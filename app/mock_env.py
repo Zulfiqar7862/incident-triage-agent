@@ -177,7 +177,7 @@ class MockCluster:
         for i in range(240):  # one line every 15s over the last hour
             sec_ago = 3600 - i * 15
             pool = incident if self._in_incident(svc, sec_ago / 60) else normal
-            line = pool[(i * 7) % len(pool)]
+            line = pool[(i * 31 + 7) % len(pool)]  # 31 is coprime with every pool size we use
             ts = (NOW - timedelta(seconds=sec_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
             out.append(f"{ts} {name}-{POD_SUFFIXES[i % 3]} {line}")
         return out
