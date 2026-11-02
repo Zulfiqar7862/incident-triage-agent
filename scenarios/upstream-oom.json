@@ -1,0 +1,126 @@
+{
+  "id": "upstream-oom",
+  "title": "Payment errors with a misleading deploy",
+  "description": "P2 on payment-gateway, which shipped a harmless deploy 16 minutes ago. The real cause is an upstream dependency (fraud-check) crash-looping out of memory. Rolling back payment-gateway does not help. The metrics backend is flaky on the first call.",
+  "alert": {
+    "id": "ALRT-4907",
+    "service": "payment-gateway",
+    "severity": "P2",
+    "title": "payment-gateway 5xx error rate above 5%",
+    "fired_min_ago": 9
+  },
+  "flaky": { "query_metrics": 1 },
+  "services": {
+    "payment-gateway": {
+      "owner": "team-payments",
+      "version": "v3.8.1",
+      "replicas": 4,
+      "pods": "4/4 Running",
+      "uptime": "16m",
+      "dependencies": ["fraud-check", "ledger-service"],
+      "config": { "UPSTREAM_TIMEOUT_MS": "1500", "CIRCUIT_BREAKER_FAILURE_RATIO": "0.4" },
+      "incident_started_min_ago": 12,
+      "deploys": [
+        { "version": "v3.8.1", "min_ago": 16, "author": "ci-bot (PR #2231)", "changes": ["Update receipt email copy", "Bump structured-logging lib 2.3 -> 2.4"] },
+        { "version": "v3.8.0", "min_ago": 4400, "author": "ci-bot (PR #2210)", "changes": ["Retry budget tuning"] }
+      ],
+      "metrics": {
+        "error_rate": { "unit": "%", "baseline": 0.2, "incident": 8.7 },
+        "latency_p99": { "unit": "ms", "baseline": 240, "incident": 1900 },
+        "cpu": { "unit": "%", "baseline": 41, "incident": 39 },
+        "memory": { "unit": "%", "baseline": 48, "incident": 49 },
+        "restarts": { "unit": "count", "baseline": 0, "incident": 0 }
+      },
+      "logs": {
+        "normal": [
+          "INFO  POST /v1/charges 201 188ms",
+          "INFO  fraud-check verdict=allow score=0.12 latency=41ms",
+          "INFO  POST /v1/charges 201 203ms"
+        ],
+        "incident": [
+          "ERROR POST /v1/charges 502 1840ms upstream fraud-check: connection reset by peer",
+          "WARN  upstream fraud-check unavailable, retrying (attempt 3/3)",
+          "INFO  POST /v1/charges 201 201ms",
+          "ERROR circuit breaker OPEN for upstream fraud-check (failure ratio 0.41)",
+          "ERROR POST /v1/charges 502 1502ms upstream fraud-check: timeout after 1500ms"
+        ]
+      }
+    },
+    "fraud-check": {
+      "owner": "team-risk",
+      "version": "v1.22.0",
+      "replicas": 4,
+      "pods": "2/4 Running, 2 CrashLoopBackOff",
+      "pods_after_fix": "4/4 Running",
+      "uptime": "9d 2h (oldest pod)",
+      "dependencies": ["feature-store"],
+      "config": { "JVM_MAX_HEAP": "1536m", "CONTAINER_MEMORY_LIMIT": "2Gi", "MODEL_CACHE_MAX_MB": "512" },
+      "incident_started_min_ago": 13,
+      "deploys": [
+        { "version": "v1.22.0", "min_ago": 13100, "author": "ci-bot (PR #87)", "changes": ["Add merchant risk tier feature"] },
+        { "version": "v1.21.3", "min_ago": 30200, "author": "ci-bot (PR #81)", "changes": ["Dependency updates"] }
+      ],
+      "metrics": {
+        "error_rate": { "unit": "%", "baseline": 0.1, "incident": 38.0 },
+        "latency_p99": { "unit": "ms", "baseline": 45, "incident": 5000 },
+        "cpu": { "unit": "%", "baseline": 30, "incident": 88 },
+        "memory": { "unit": "%", "baseline": 61, "incident": 97 },
+        "restarts": { "unit": "count", "baseline": 0, "incident": 14 }
+      },
+      "logs": {
+        "normal": [
+          "INFO  POST /score 200 38ms verdict=allow",
+          "INFO  POST /score 200 44ms verdict=review",
+          "DEBUG heap used=58% after young GC"
+        ],
+        "incident": [
+          "WARN  GC overhead high: 87% of time in GC over last 60s",
+          "ERROR java.lang.OutOfMemoryError: Java heap space at com.risk.SessionCache.put(SessionCache.java:212)",
+          "WARN  heap used=97% after full GC; session cache entries=4.1M (no eviction since start)",
+          "ERROR container fraud-check OOMKilled (limit 2Gi), restarting (restart count 7)",
+          "INFO  POST /score 200 912ms verdict=allow"
+        ]
+      }
+    },
+    "ledger-service": {
+      "owner": "team-payments",
+      "version": "v8.0.4",
+      "replicas": 3,
+      "pods": "3/3 Running",
+      "uptime": "20d",
+      "dependencies": [],
+      "config": {},
+      "deploys": [
+        { "version": "v8.0.4", "min_ago": 29000, "author": "ci-bot (PR #511)", "changes": ["Index on settlement_date"] }
+      ],
+      "metrics": {
+        "error_rate": { "unit": "%", "baseline": 0.0 },
+        "latency_p99": { "unit": "ms", "baseline": 35 }
+      },
+      "logs": { "normal": ["INFO  ledger entry committed txn=ok"] }
+    },
+    "feature-store": {
+      "owner": "team-risk",
+      "version": "v2.3.1",
+      "replicas": 2,
+      "pods": "2/2 Running",
+      "uptime": "33d",
+      "dependencies": [],
+      "config": {},
+      "deploys": [
+        { "version": "v2.3.1", "min_ago": 47000, "author": "ci-bot (PR #44)", "changes": ["Upgrade Redis client"] }
+      ],
+      "metrics": {
+        "error_rate": { "unit": "%", "baseline": 0.0 },
+        "latency_p99": { "unit": "ms", "baseline": 6 }
+      },
+      "logs": { "normal": ["INFO  GET /features merchant=m_9921 200 3ms"] }
+    }
+  },
+  "expected": {
+    "fix_any_of": [
+      { "tool": "restart_service", "args": { "service": "fraud-check" } }
+    ],
+    "root_cause_keywords": [["fraud-check"], ["memory", "oom", "heap"]]
+  }
+}
