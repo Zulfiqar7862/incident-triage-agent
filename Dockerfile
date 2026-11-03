@@ -9,6 +9,7 @@ RUN pip install -r requirements.txt
 
 COPY app ./app
 COPY scenarios ./scenarios
+COPY runbooks ./runbooks
 COPY static ./static
 COPY scripts ./scripts
 COPY evals ./evals

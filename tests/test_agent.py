@@ -284,3 +284,34 @@ def test_http_api_round_trip(tmp_path):
         assert client.get("/api/runs/nope").status_code == 404
         assert client.post("/api/runs", json={"scenario_id": "../etc/passwd"}).status_code == 404
         assert len(client.get(f"/api/runs/{rid}/events").json()) > 10
+
+
+def test_mid_approval_crash_does_not_duplicate_tool_result(tmp_path):
+    """Crash after recording the tool result but before clearing pending must not double-append."""
+    async def go():
+        from app.tools import TOOLS
+        from app.llm import ToolCall
+
+        settings, store, rt = make(tmp_path)
+        rid = rt.create_run("db-pool-regression")["run_id"]
+        await wait_for(store, rid, {"awaiting_approval"})
+        st = store.load(rid)
+        p = st["pending"]
+        args = TOOLS[p["tool"]].parse(p["args"])
+        final = args.model_dump()
+        p["executing"], p["final_args"] = True, final
+        content = TOOLS[p["tool"]].handler(rt._cluster(st), args, p["tool_call_id"])
+        rt._record(st, p["step"], ToolCall(p["tool_call_id"], p["tool"], final),
+                   f"Operator APPROVED this action.\nResult: {content}", False, {})
+        store.save(st)  # pending still set — crash window
+
+        rt2 = Runtime(store, ScriptedPolicy(delay_s=0), settings)
+        assert rt2.recover() == 1
+        assert store.load(rid)["status"] == "interrupted"
+        rt2.resume(rid)  # completes idempotent approval without a second human click
+        st = await wait_for(store, rid, {"completed"})
+        n = sum(1 for m in st["history"] if m.get("role") == "tool" and m.get("tool_call_id") == p["tool_call_id"])
+        assert n == 1
+        assert len(st["env"]["applied"]) == 1
+        assert st["result"]["sim_resolved"]
+    asyncio.run(go())

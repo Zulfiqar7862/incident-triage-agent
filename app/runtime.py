@@ -16,6 +16,7 @@ Durability
 from __future__ import annotations
 
 import asyncio
+import threading
 import json
 import logging
 import time
@@ -104,6 +105,8 @@ class Runtime:
         self.tools = tool_schemas()
         self._tasks: dict[str, asyncio.Task] = {}
         self._control: dict[str, str] = {}
+        self._gate_locks: dict[str, threading.Lock] = {}
+        self._gate_locks_mu = threading.Lock()
 
     # ---- queries -------------------------------------------------------------------------
     def get(self, run_id: str) -> dict:
@@ -115,6 +118,18 @@ class Runtime:
     def is_active(self, run_id: str) -> bool:
         t = self._tasks.get(run_id)
         return bool(t and not t.done())
+
+
+    def _gate_lock(self, run_id: str) -> threading.Lock:
+        with self._gate_locks_mu:
+            lock = self._gate_locks.get(run_id)
+            if lock is None:
+                lock = threading.Lock()
+                self._gate_locks[run_id] = lock
+            return lock
+
+    def _tool_result_recorded(self, st: dict, tool_call_id: str) -> bool:
+        return any(m.get("role") == "tool" and m.get("tool_call_id") == tool_call_id for m in st.get("history") or [])
 
     def public(self, st: dict, include_history: bool = False) -> dict:
         view = {k: v for k, v in st.items() if k not in ("history", "env")}
@@ -138,10 +153,19 @@ class Runtime:
     # ---- lifecycle -------------------------------------------------------------------------
     def recover(self) -> int:
         """On startup, mark runs that were mid-flight when the process died."""
-        runs = self.store.runs_with_status(["running", "queued"])
-        for st in runs:
+        n = 0
+        for st in self.store.runs_with_status(["running", "queued"]):
             self._set_status(st, "interrupted", "The server stopped while this run was in progress. Resume to continue from the last checkpoint.")
-        return len(runs)
+            n += 1
+        # Mid-approval crash: intent was checkpointed (pending.executing) but the process died
+        # before clearing the gate. Surface as interrupted so Resume finishes idempotently.
+        for st in self.store.runs_with_status(["awaiting_approval"]):
+            p = st.get("pending") or {}
+            if p.get("kind") == "approval" and p.get("executing"):
+                self._set_status(st, "interrupted",
+                                 "The server stopped while applying an approved change. Resume to finish the idempotent apply.")
+                n += 1
+        return n
 
     def create_run(self, scenario_id: str) -> dict:
         try:
@@ -193,7 +217,13 @@ class Runtime:
                 # Persist a raised ceiling on the run itself so resume is meaningful.
                 st["max_run_cost_usd"] = round(st.get("max_run_cost_usd", self.settings.max_run_cost_usd) * 1.5, 4)
         p = st.get("pending")
-        if p:  # stopped while waiting on a human: go back to waiting, don't call the model
+        if p:
+            # Crash mid-approval: mutation may already be applied (idempotent by tool-call id).
+            # Finish the gate without asking the operator to click Approve again.
+            if p.get("kind") == "approval" and p.get("executing"):
+                self._emit(st, "operator.control", {"action": "resume", "complete_interrupted_approval": True})
+                self.approve(run_id, p.get("final_args"), actor="system-resume")
+                return
             kind = "awaiting_approval" if p["kind"] == "approval" else "awaiting_input"
             self._set_status(st, kind, "Restored the pending operator decision from the checkpoint")
             return
@@ -203,52 +233,76 @@ class Runtime:
 
     # ---- human-in-the-loop -------------------------------------------------------------------
     def approve(self, run_id: str, edited_args: dict | None = None, actor: str = "operator") -> None:
-        st = self.get(run_id)
-        p = st.get("pending")
-        if st["status"] != "awaiting_approval" or not p or p["kind"] != "approval":
-            raise RunStateError(f"Run is {st['status']}; nothing is waiting for approval")
-        spec = TOOLS[p["tool"]]
-        try:
-            args = spec.parse({**p["args"], **(edited_args or {})})
-        except ToolArgsError as e:
-            raise InvalidInput(f"Edited arguments are invalid: {e}") from None
-        final = args.model_dump()
-        edited = final != p["args"]
+        with self._gate_lock(run_id):
+            st = self.get(run_id)
+            p = st.get("pending")
+            # Interrupted approval may still be "interrupted"/"paused"/etc. with pending.executing set.
+            can_finish = (
+                (st["status"] == "awaiting_approval" and p and p.get("kind") == "approval")
+                or (p and p.get("kind") == "approval" and p.get("executing"))
+            )
+            if not can_finish:
+                raise RunStateError(f"Run is {st['status']}; nothing is waiting for approval")
+            spec = TOOLS[p["tool"]]
+            # Crash recovery: tool result already in history — do not record again.
+            if p.get("executing") and self._tool_result_recorded(st, p["tool_call_id"]):
+                st["pending"] = None
+                self.store.save(st)
+                self._launch(run_id)
+                return
+            base_args = p.get("final_args") or p["args"]
+            try:
+                args = spec.parse({**base_args, **(edited_args or {})})
+            except ToolArgsError as e:
+                raise InvalidInput(f"Edited arguments are invalid: {e}") from None
+            final = args.model_dump()
+            edited = final != p["args"]
 
-        # Checkpoint the intent before touching production. If we crash after this,
-        # re-approving replays idempotently (same action id).
-        p["executing"], p["final_args"] = True, final
-        self.store.save(st)
-        try:
-            content, is_error = _fmt(spec.handler(self._cluster(st), args, p["tool_call_id"])), False
-        except ToolError as e:
-            content, is_error = f"Execution failed: {e}", True
+            # Checkpoint the intent before touching production. If we crash after this,
+            # re-approving / resume replays idempotently (same action id) and records at most once.
+            p["executing"], p["final_args"] = True, final
+            self.store.save(st)
+            try:
+                content, is_error = _fmt(spec.handler(self._cluster(st), args, p["tool_call_id"])), False
+            except ToolError as e:
+                content, is_error = f"Execution failed: {e}", True
 
-        header = "Operator APPROVED this action" + (f" after editing the arguments to {json.dumps(final)}" if edited else "") + "."
-        st["operator_log"].append({"step": p["step"], "decision": "approved", "tool": p["tool"], "args": final,
-                                   "edited": edited, "actor": actor, "at": time.time()})
-        self._emit(st, "approval.decided", {"id": p["tool_call_id"], "decision": "approved", "tool": p["tool"],
-                                            "args": final, "edited": edited, "actor": actor})
-        self._record(st, p["step"], ToolCall(p["tool_call_id"], p["tool"], final), f"{header}\nResult: {content}", is_error, {})
-        st["pending"] = None
-        self.store.save(st)
-        self._launch(run_id)
+            if self._tool_result_recorded(st, p["tool_call_id"]):
+                st["pending"] = None
+                self.store.save(st)
+                self._launch(run_id)
+                return
+
+            header = "Operator APPROVED this action" + (f" after editing the arguments to {json.dumps(final)}" if edited else "") + "."
+            if actor == "system-resume":
+                header = "Resumed an interrupted approval; replaying the idempotent production change."
+            st["operator_log"].append({"step": p["step"], "decision": "approved", "tool": p["tool"], "args": final,
+                                       "edited": edited, "actor": actor, "at": time.time()})
+            self._emit(st, "approval.decided", {"id": p["tool_call_id"], "decision": "approved", "tool": p["tool"],
+                                                "args": final, "edited": edited, "actor": actor})
+            self._record(st, p["step"], ToolCall(p["tool_call_id"], p["tool"], final), f"{header}\nResult: {content}", is_error, {})
+            st["pending"] = None
+            self.store.save(st)
+            self._launch(run_id)
 
     def reject(self, run_id: str, feedback: str = "", actor: str = "operator") -> None:
-        st = self.get(run_id)
-        p = st.get("pending")
-        if st["status"] != "awaiting_approval" or not p or p["kind"] != "approval":
-            raise RunStateError(f"Run is {st['status']}; nothing is waiting for approval")
-        feedback = feedback.strip()
-        st["operator_log"].append({"step": p["step"], "decision": "rejected", "tool": p["tool"], "feedback": feedback,
-                                   "actor": actor, "at": time.time()})
-        self._emit(st, "approval.decided", {"id": p["tool_call_id"], "decision": "rejected", "tool": p["tool"],
-                                            "feedback": feedback, "actor": actor})
-        self._record(st, p["step"], ToolCall(p["tool_call_id"], p["tool"], p["args"]),
-                     f"Operator REJECTED this action; it was NOT executed. Feedback: {feedback or '(none given)'}", False, {})
-        st["pending"] = None
-        self.store.save(st)
-        self._launch(run_id)
+        with self._gate_lock(run_id):
+            st = self.get(run_id)
+            p = st.get("pending")
+            if st["status"] != "awaiting_approval" or not p or p["kind"] != "approval":
+                raise RunStateError(f"Run is {st['status']}; nothing is waiting for approval")
+            if p.get("executing"):
+                raise RunStateError("This approval is already executing and cannot be rejected; resume to finish it.")
+            feedback = feedback.strip()
+            st["operator_log"].append({"step": p["step"], "decision": "rejected", "tool": p["tool"], "feedback": feedback,
+                                       "actor": actor, "at": time.time()})
+            self._emit(st, "approval.decided", {"id": p["tool_call_id"], "decision": "rejected", "tool": p["tool"],
+                                                "feedback": feedback, "actor": actor})
+            self._record(st, p["step"], ToolCall(p["tool_call_id"], p["tool"], p["args"]),
+                         f"Operator REJECTED this action; it was NOT executed. Feedback: {feedback or '(none given)'}", False, {})
+            st["pending"] = None
+            self.store.save(st)
+            self._launch(run_id)
 
     def message(self, run_id: str, text: str, actor: str = "operator") -> None:
         text = (text or "").strip()

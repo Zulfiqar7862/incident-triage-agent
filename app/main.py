@@ -63,9 +63,27 @@ def create_app(settings: Settings | None = None, llm=None) -> FastAPI:
         log.info("ready: provider=%s model=%s", runtime.llm.provider, runtime.llm.model)
         yield
         await runtime.shutdown()
+        client = getattr(runtime.llm, "_client", None)
+        if client is not None:
+            try:
+                await client.aclose()
+            except Exception:  # noqa: BLE001
+                pass
         shutdown_tracing()
 
-    app = FastAPI(title="Incident Triage Agent", version="1.0.0", lifespan=lifespan)
+    app = FastAPI(
+        title="Incident Triage Agent",
+        version="1.0.0",
+        lifespan=lifespan,
+        description=(
+            "Durable incident-triage agent runtime: investigate alerts with tools, "
+            "gate production changes behind operator approval (with confidence routing), "
+            "checkpoint every step to SQLite, and stream the decision trace over SSE.\n\n"
+            "When `API_TOKEN` is set, send `Authorization: Bearer <token>` "
+            "(SSE may use `?token=` because EventSource cannot set headers). "
+            "Optional `X-Operator` is recorded in the audit log."
+        ),
+    )
     app.state.runtime = runtime
 
     # ---- errors and security headers -------------------------------------------------------
@@ -187,11 +205,16 @@ def create_app(settings: Settings | None = None, llm=None) -> FastAPI:
             nonlocal cursor
             yield "retry: 2000\n\n"
             idle = 0
+            from .runtime import TERMINAL
             while not await request.is_disconnected():
                 events = store.events_since(run_id, cursor)
                 for e in events:
                     cursor = e["seq"]
                     yield f"id: {e['seq']}\ndata: {json.dumps(e, default=str)}\n\n"
+                st = store.load(run_id) or {}
+                if st.get("status") in TERMINAL and not events:
+                    yield f"event: end\ndata: {json.dumps({"status": st.get("status")})}\n\n"
+                    return
                 idle = 0 if events else idle + 1
                 if idle and idle % 60 == 0:
                     yield ": keepalive\n\n"

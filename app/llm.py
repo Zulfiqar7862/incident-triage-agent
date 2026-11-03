@@ -272,12 +272,14 @@ class OpenAILLM:
     def __init__(self, model: str, api_key: str, timeout: float, max_output_tokens: int = 8192,
                  transport: httpx.AsyncBaseTransport | None = None):
         self.model = model
+        self.max_output_tokens = max_output_tokens
         self._headers = {"Authorization": f"Bearer {api_key}", "content-type": "application/json"}
         self._client = _client(timeout, transport)
 
     async def complete(self, system: str, messages: list[dict], tools: list[dict], state: dict | None = None) -> LLMResponse:
         payload = {
             "model": self.model,
+            "max_tokens": self.max_output_tokens,
             "messages": [{"role": "system", "content": system}] + to_openai(messages),
             "tools": [{"type": "function", "function": {"name": t["name"], "description": t["description"], "parameters": t["input_schema"]}} for t in tools],
         }
