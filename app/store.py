@@ -1,6 +1,9 @@
-"""SQLite persistence: run checkpoints, the append-only event log the UI streams,
-an operator inbox, and long-term memory. Every agent step is checkpointed here,
-which is what lets a run survive a process restart."""
+"""SQLite persistence for runs/events/inbox/memories.
+
+Schema is defined in app.db.models and versioned via Alembic
+(app/db/migrations). This Store remains the sync facade the Runtime and
+UI use; the async SQLAlchemy engine is available for workers/jobs.
+"""
 from __future__ import annotations
 
 import json

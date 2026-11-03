@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 
 import httpx
 
-from .config import ConfigError, Settings
+from app.config import ConfigError, Settings
 
 
 @dataclass
@@ -334,6 +334,6 @@ def make_llm(settings: Settings, transport: httpx.AsyncBaseTransport | None = No
         if not os.getenv("OPENAI_API_KEY"):
             raise ConfigError("LLM_PROVIDER=openai but OPENAI_API_KEY is not set")
         return OpenAILLM(settings.openai_model, os.environ["OPENAI_API_KEY"], settings.llm_timeout_s, settings.llm_max_output_tokens, transport)
-    from .scripted import ScriptedPolicy
+    from app.scripted import ScriptedPolicy
 
     return ScriptedPolicy(delay_s=settings.scripted_delay_s)

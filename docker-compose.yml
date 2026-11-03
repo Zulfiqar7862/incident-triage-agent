@@ -6,11 +6,35 @@ services:
       - "127.0.0.1:8000:8000"   # bind to localhost; put a TLS proxy in front to expose it
     env_file: .env
     environment:
-      REQUIRE_LLM: "true"        # refuse to start without a real model
+      REQUIRE_LLM: ${REQUIRE_LLM:-true}        # refuse to start without a real model
+      DATABASE_URL: ${DATABASE_URL:-}
+      DB_PATH: /data/agent.db
+      LOG_FORMAT: json
       # Set API_TOKEN in .env before exposing beyond localhost
     volumes:
       - agent-data:/data
     restart: unless-stopped
     stop_grace_period: 30s
+
+  # Optional Postgres: DATABASE_URL=postgresql+asyncpg://agent:agent@db:5432/agent
+  #   docker compose --profile postgres up --build
+  db:
+    image: postgres:16-alpine
+    profiles: ["postgres"]
+    environment:
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD: agent
+      POSTGRES_DB: agent
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
 volumes:
   agent-data:
+  pgdata:

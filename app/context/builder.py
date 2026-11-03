@@ -18,8 +18,8 @@ from __future__ import annotations
 
 import json
 
-from .config import Settings
-from .tools import tool_schemas
+from app.config import Settings
+from app.tools import tool_schemas
 
 SYSTEM_PROMPT = """You are an autonomous incident-triage agent for a platform engineering team. You investigate production alerts with tools, find the root cause, propose a safe remediation, and verify it worked.
 

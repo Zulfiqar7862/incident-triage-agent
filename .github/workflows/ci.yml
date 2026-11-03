@@ -12,6 +12,9 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements-dev.txt
+      - run: ruff check app tests evals scripts
+      - run: mypy -p app
+        continue-on-error: true
       - run: pytest -q
       - run: python -m evals.run_evals --provider scripted
         env:

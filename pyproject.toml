@@ -1,0 +1,22 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+src = ["app", "tests", "evals", "scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501", "B008"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+warn_unused_ignores = true
+check_untyped_defs = true
+# Strict-ish without blocking the take-home on third-party stubs
+disallow_untyped_defs = false
+pretty = true
+files = ["app"]
+
+[[tool.mypy.overrides]]
+module = ["langgraph.*", "langfuse.*", "opentelemetry.*"]
+ignore_missing_imports = true

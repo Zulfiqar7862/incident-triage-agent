@@ -12,7 +12,7 @@ from typing import Any, Callable, Literal, Optional
 
 from pydantic import BaseModel, Field, ValidationError
 
-from .runbooks import search_runbooks
+from app.runbooks import search_runbooks
 
 
 class ToolArgsError(Exception):

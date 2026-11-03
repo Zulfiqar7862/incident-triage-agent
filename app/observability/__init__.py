@@ -1,3 +1,3 @@
-from .tracing import configure_tracing, span, shutdown_tracing
+from .tracing import configure_tracing, shutdown_tracing, span
 
-__all__ = ["configure_tracing", "span", "shutdown_tracing"]
+__all__ = ["configure_tracing", "shutdown_tracing", "span"]

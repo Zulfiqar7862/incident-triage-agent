@@ -20,6 +20,8 @@ from .context import SYSTEM_PROMPT, build_context
 from .llm import make_llm
 from .logging_setup import configure_logging
 from .observability.tracing import configure_tracing, shutdown_tracing
+from .observability.langfuse_tracer import configure_langfuse, shutdown_langfuse
+from .observability.metrics import render_metrics, set_event_counts, set_run_counts
 from .mock_env import list_scenarios
 from .runtime import InvalidInput, NotFound, Runtime, RunStateError, TooBusy
 from .store import Store
@@ -54,6 +56,7 @@ def create_app(settings: Settings | None = None, llm=None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         configure_tracing(settings.otlp_endpoint)
+        configure_langfuse(settings.langfuse_public_key, settings.langfuse_secret_key, settings.langfuse_host)
         n = runtime.recover()
         if n:
             log.warning("marked %d in-flight run(s) as interrupted after restart", n)
@@ -69,6 +72,7 @@ def create_app(settings: Settings | None = None, llm=None) -> FastAPI:
                 await client.aclose()
             except Exception:  # noqa: BLE001
                 pass
+        shutdown_langfuse()
         shutdown_tracing()
 
     app = FastAPI(
@@ -139,17 +143,17 @@ def create_app(settings: Settings | None = None, llm=None) -> FastAPI:
             return JSONResponse({"ok": False, "db": str(e)}, status_code=503)
         return {"ok": True, "llm": runtime.llm.provider}
 
-    @app.get("/metrics", response_class=PlainTextResponse)
-    def metrics():
-        lines = ["# TYPE agent_runs gauge"]
-        lines += [f'agent_runs{{status="{s}"}} {n}' for s, n in store.status_counts().items()]
-        lines.append("# TYPE agent_events_total counter")
-        lines += [f'agent_events_total{{type="{t}"}} {n}' for t, n in store.event_counts().items()]
-        lines.append("# TYPE agent_active_runs gauge")
-        lines.append(f"agent_active_runs {sum(1 for t in runtime._tasks.values() if not t.done())}")
-        return "\n".join(lines) + "\n"
+    @app.get("/metrics")
+    async def metrics():
+        try:
+            set_run_counts(runtime.store.status_counts())
+            set_event_counts(runtime.store.event_counts())
+        except Exception:  # noqa: BLE001
+            pass
+        body, ctype = render_metrics()
+        return PlainTextResponse(body.decode("utf-8"), media_type=ctype)
 
-    # ---- API ------------------------------------------------------------------------------------
+
     @app.get("/api/health")
     def health(_: str = Depends(require_auth)):
         return {

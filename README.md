@@ -1,6 +1,6 @@
 # Incident triage agent
 
-**60-second pitch.** An operator pastes a production alert. The agent plans, calls tools (metrics, logs, deploys, runbooks), updates structured working memory, and proposes a fix. **Every production change stops at a durable approval gate** with a confidence score — low confidence is bounced back to the agent instead of paging a human. The operator watches the live reasoning trace (SSE), can edit/reject/redirect, and can resume after a crash from the last SQLite checkpoint. Built as a small custom runtime (not LangGraph) for an Intuitive Technology Partners Senior AI Engineer take-home: durable execution, HITL, context budgets, evals.
+**60-second pitch.** An operator pastes a production alert. The agent plans, calls tools (metrics, logs, deploys, runbooks), updates structured working memory, and proposes a fix. **Every production change stops at a durable approval gate** with a confidence score — low confidence is bounced back to the agent instead of paging a human. The operator watches the live reasoning trace (SSE), can edit/reject/redirect, and can resume after a crash from the last checkpoint. Orchestrated with a real **LangGraph StateGraph** (`interrupt` + `Command(resume=...)`, Sqlite/Postgres checkpointer) behind a thin Runtime facade that keeps the REST/SSE/UI contract stable. Built for an Intuitive Technology Partners Senior AI Engineer take-home: durable execution, HITL, context budgets, evals, production-grade stack.
 
 ![Approval gate](docs/screenshots/approval-gate.png)
 
@@ -32,36 +32,59 @@ Pick a scenario → **Start triage**. Enter your name in the header (audit ident
 ## Architecture
 
 ```mermaid
-flowchart LR
-  UI[Operator UI] -->|REST + SSE| API[FastAPI]
-  API --> RT[Runtime loop]
-  RT --> LLM[LLM adapter<br/>Gemini / Anthropic / OpenAI / scripted]
+flowchart TD
+  UI[Operator UI] -->|REST + SSE| API[FastAPI app/api + app/main]
+  API --> RT[Runtime facade]
+  RT --> LG[LangGraph StateGraph]
+  LG --> P[prepare]
+  P --> A[act: LLM + reads]
+  A -->|write / ask| G[approval / input<br/>interrupt + Command resume]
+  A -->|continue| P
+  G --> P
+  A -->|finish / budget| END([END])
+  LG --> CP[(LangGraph checkpointer<br/>SQLite or Postgres)]
+  RT --> Store[(Store: runs · events · inbox · memory)]
+  RT --> LLM[LLM adapters + scripted]
   RT --> Tools[Tool registry]
-  Tools --> Sim[Simulated cluster<br/>state in checkpoint]
-  RT --> Ctx[Context builder<br/>memory + compaction]
-  RT --> DB[(SQLite checkpoints<br/>events · inbox · memory)]
+  Tools --> Sim[Simulated cluster]
 ```
 
-| File | Responsibility |
+| Path | Responsibility |
 |---|---|
-| `app/runtime.py` | Run lifecycle, agent loop, retries, human gates, checkpoints, events |
-| `app/context.py` | Layered prompt: system + working memory + compacted transcript |
-| `app/tools.py` | Typed schemas; read / write / meta kinds |
-| `app/llm.py` | Neutral history + Gemini / Anthropic / OpenAI adapters |
+| `app/agent/graph.py` | LangGraph `StateGraph` wiring (`prepare` → `act` → gates → loop) |
+| `app/agent/nodes/` | Node implementations; HITL via `interrupt` / `Command(resume=...)` |
+| `app/runtime.py` | Lifecycle facade: create/pause/cancel/approve; drives the graph |
+| `app/config/` | `pydantic-settings` v2 typed settings |
+| `app/context/` | Layered prompt: system + working memory + compacted transcript |
+| `app/tools/` | Typed schemas; read / write / meta kinds |
+| `app/llm/` | Neutral history + Gemini / Anthropic / OpenAI adapters |
+| `app/db/` | SQLAlchemy 2.0 models + Alembic migrations |
+| `app/store.py` | Sync Store facade over SQLite (UI/SSE source of truth) |
+| `app/observability/` | structlog, OTel GenAI spans, Prometheus `/metrics`, optional Langfuse |
 | `app/main.py` | HTTP API, auth, health/metrics, SSE |
-| `app/store.py` | SQLite persistence |
-| `app/memory.py` | Long-term promotion, redaction, TTL recall |
-| `app/guards.py` | Loop fingerprints + injection-marker detection |
-| `app/runbooks.py` | Keyword runbook retrieval |
-| `app/observability/tracing.py` | GenAI-style spans; optional OTLP/HTTP |
-| `app/mock_env.py`, `scenarios/` | Deterministic simulation |
-| `app/scripted.py` | Offline policy for keyless demos and tests |
 | `static/index.html` | Operator UI (no build step) |
 | `scripts/quickstart.sh` | One-command local boot |
 
 ### The loop
 
-Each step: read operator inbox → rebuild prompt from checkpoint → call model → execute tools (reads in parallel with retry/backoff; writes become durable gates) → checkpoint. Stops at a gate, budget, `finish`, pause, or cancel.
+LangGraph nodes: **prepare** (control/budgets/inbox) → **act** (LLM + parallel reads + memory) → either continue, **approval**/**input** gate (`interrupt`), or END. Writes resume with `Command(resume=...)`; production applies are idempotent by tool-call id. Dual persistence: LangGraph checkpointer (graph/interrupt) + Store (events/UI).
+
+## Stack and why each piece
+
+| Piece | Role | Why this one | Honest tradeoff |
+|---|---|---|---|
+| **LangGraph** | Orchestration + HITL | Real `interrupt`/`Command(resume)`, durable threads, replaces the hand-rolled loop | Another moving part; we keep a Runtime facade so the UI contract stays stable |
+| **pydantic v2 + pydantic-settings** | Typed state/config/API | One schema stack for Settings, tool args, HTTP models | Settings must ignore ambient `.env` in unit tests (`from_env` only) |
+| **SQLAlchemy 2.0 async + Alembic** | App data schema | Portable SQLite→Postgres; migrations as code | Runtime still uses the sync `Store` facade for simplicity; async engine ready for workers |
+| **LangGraph checkpointer** | Graph durability | Sqlite default; `langgraph-checkpoint-postgres` when `DATABASE_URL` is Postgres | Two DBs conceptually (Store + checkpointer); same deployment story |
+| **tenacity** | LLM/tool retries | Standard retry semantics with jitter caps | We still emit `llm.retry` events ourselves for the UI trace |
+| **structlog** | JSON logs + redaction | Ops-friendly structured logs without a heavyweight agent | Text mode kept for local demos |
+| **OpenTelemetry SDK** | GenAI spans | Semantic conventions; optional OTLP exporter | No auto-instrumentation of every HTTP call — deliberate, keep deps light |
+| **Langfuse** | Optional LLM telemetry | Enabled only when `LANGFUSE_*` keys exist; no-op otherwise | Extra SaaS if you turn it on; zero cost if you don't |
+| **prometheus-client** | `/metrics` | Tokens, cost, latency, approvals, run states | Counters mirrored from Store on scrape for event totals |
+| **ruff + mypy + pre-commit** | Quality gates | Fast lint/format; gradual typed core | mypy is strict-*ish*; third-party stubs incomplete |
+| **DeepEval** | — | **Not adopted** | Pulls a heavy eval stack (and sentry); our golden harness + scripted/Gemini judge already gates regressions cleanly offline and in CI |
+
 
 ```
 queued → running ⇄ awaiting_approval / awaiting_input / paused / needs_attention → completed | failed | cancelled
