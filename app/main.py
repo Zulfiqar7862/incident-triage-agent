@@ -19,6 +19,7 @@ from .config import Settings
 from .context import SYSTEM_PROMPT, build_context
 from .llm import make_llm
 from .logging_setup import configure_logging
+from .observability.tracing import configure_tracing, shutdown_tracing
 from .mock_env import list_scenarios
 from .runtime import InvalidInput, NotFound, Runtime, RunStateError, TooBusy
 from .store import Store
@@ -52,6 +53,7 @@ def create_app(settings: Settings | None = None, llm=None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        configure_tracing(settings.otlp_endpoint)
         n = runtime.recover()
         if n:
             log.warning("marked %d in-flight run(s) as interrupted after restart", n)
@@ -61,6 +63,7 @@ def create_app(settings: Settings | None = None, llm=None) -> FastAPI:
         log.info("ready: provider=%s model=%s", runtime.llm.provider, runtime.llm.model)
         yield
         await runtime.shutdown()
+        shutdown_tracing()
 
     app = FastAPI(title="Incident Triage Agent", version="1.0.0", lifespan=lifespan)
     app.state.runtime = runtime
