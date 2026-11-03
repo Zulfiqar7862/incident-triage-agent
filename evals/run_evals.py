@@ -171,6 +171,8 @@ async def main() -> int:
     settings = Settings.from_env()
     if args.provider:
         settings.llm_provider = args.provider
+        if args.provider == "scripted":
+            settings.require_llm = False  # offline golden set must run without a key
     settings.scripted_delay_s = 0
     settings.db_path = os.path.join(tempfile.mkdtemp(), "eval.db")
     store = Store(settings.db_path)
