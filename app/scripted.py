@@ -130,6 +130,12 @@ class ScriptedPolicy:
                 continue
             break
 
+        if not C.find("search_runbooks"):
+            logs = (C.last("search_logs", service=target) or {}).get("content") or ""
+            q = " ".join(w for w in ("pool", "oom", "crashloop", "timeout", "memory") if w in logs.lower()) or f"{target} errors"
+            return _resp(f"Checking runbooks for '{q}' before proposing a change.",
+                         [_call("search_runbooks", query=q, top_k=2)])
+
         writes = [c for c in C.items if c["name"] in WRITE_TOOLS and c["content"] is not None]
         if not writes:
             return self._propose(C, svc, target)

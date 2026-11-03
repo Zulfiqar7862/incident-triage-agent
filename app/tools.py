@@ -12,6 +12,8 @@ from typing import Any, Callable, Literal, Optional
 
 from pydantic import BaseModel, Field, ValidationError
 
+from .runbooks import search_runbooks
+
 
 class ToolArgsError(Exception):
     pass
@@ -36,6 +38,11 @@ class LogsArgs(BaseModel):
     service: str = Field(description="Service name")
     query: str = Field(description="Space-separated keywords; a line matches if it contains ANY keyword (case-insensitive). Use '*' for all lines.")
     limit: int = Field(50, ge=1, le=500, description="Max lines to return (most recent first kept)")
+
+
+class RunbookArgs(BaseModel):
+    query: str = Field(description="Symptoms or keywords to search, e.g. 'db pool exhausted' or 'OOMKilled crashloop'")
+    top_k: int = Field(2, ge=1, le=3, description="Max runbooks to return (precision over volume)")
 
 
 class RollbackArgs(BaseModel):
@@ -128,6 +135,8 @@ _SPECS = [
              "read", MetricsArgs, lambda cl, a, cid: cl.query_metrics(a.service, a.metric, a.window_minutes)),
     ToolSpec("search_logs", "Search a service's logs from the last hour. Returns matching lines, most recent last. Large results are truncated, so prefer specific keywords.",
              "read", LogsArgs, lambda cl, a, cid: cl.search_logs(a.service, a.query, a.limit)),
+    ToolSpec("search_runbooks", "Retrieve internal runbooks matching the symptoms. Prefer this before proposing a production change when the cause looks familiar. Returns short excerpts, not the whole library.",
+             "read", RunbookArgs, lambda cl, a, cid: search_runbooks(a.query, a.top_k)),
     ToolSpec("get_recent_deploys", "Deploy history for a service (newest first) with change notes, plus any actions taken during this incident.",
              "read", ServiceArgs, lambda cl, a, cid: cl.get_recent_deploys(a.service)),
     ToolSpec("rollback_deploy", "PRODUCTION CHANGE, requires operator approval. Roll a service back to a previous version from its deploy history.",
