@@ -498,5 +498,9 @@ async function showContext() {
   $("#ctxDlg").showModal();
 }
 
+window.addEventListener("hashchange", () => {
+  const id = location.hash.slice(1);
+  if (id && id !== runId) select(id);
+});
 document.addEventListener("DOMContentLoaded", init);
 })();
