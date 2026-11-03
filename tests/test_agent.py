@@ -263,7 +263,7 @@ def test_http_api_round_trip(tmp_path):
     app = create_app(settings, llm=ScriptedPolicy(delay_s=0))
     with TestClient(app) as client:
         assert client.get("/api/health").json()["llm"]["provider"] == "scripted"
-        assert len(client.get("/api/tools").json()) == 11
+        assert len(client.get("/api/tools").json()) == 12
         rid = client.post("/api/runs", json={"scenario_id": "upstream-oom"}).json()["run_id"]
         for _ in range(300):
             st = client.get(f"/api/runs/{rid}").json()

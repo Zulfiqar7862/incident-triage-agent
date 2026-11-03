@@ -9,7 +9,9 @@
     "title": "checkout-service 5xx error rate above 5% for 10 minutes",
     "fired_min_ago": 14
   },
-  "flaky": { "search_logs": 1 },
+  "flaky": {
+    "search_logs": 1
+  },
   "services": {
     "checkout-service": {
       "owner": "team-checkout",
@@ -17,7 +19,11 @@
       "replicas": 6,
       "pods": "6/6 Running",
       "uptime": "23m",
-      "dependencies": ["orders-db", "payment-gateway", "inventory-service"],
+      "dependencies": [
+        "orders-db",
+        "payment-gateway",
+        "inventory-service"
+      ],
       "config": {
         "DB_POOL_SIZE": "5",
         "DB_POOL_TIMEOUT_MS": "3000",
@@ -26,16 +32,58 @@
       },
       "incident_started_min_ago": 21,
       "deploys": [
-        { "version": "v2.14.0", "min_ago": 23, "author": "ci-bot (PR #812)", "changes": ["Tune DB pool: DB_POOL_SIZE 50 -> 5", "Upgrade http client 4.2 -> 4.3"] },
-        { "version": "v2.13.2", "min_ago": 4380, "author": "ci-bot (PR #798)", "changes": ["Fix rounding in tax display"] },
-        { "version": "v2.13.1", "min_ago": 10140, "author": "ci-bot (PR #790)", "changes": ["Add one-click checkout flag"] }
+        {
+          "version": "v2.14.0",
+          "min_ago": 23,
+          "author": "ci-bot (PR #812)",
+          "changes": [
+            "Tune DB pool: DB_POOL_SIZE 50 -> 5",
+            "Upgrade http client 4.2 -> 4.3"
+          ]
+        },
+        {
+          "version": "v2.13.2",
+          "min_ago": 4380,
+          "author": "ci-bot (PR #798)",
+          "changes": [
+            "Fix rounding in tax display"
+          ]
+        },
+        {
+          "version": "v2.13.1",
+          "min_ago": 10140,
+          "author": "ci-bot (PR #790)",
+          "changes": [
+            "Add one-click checkout flag"
+          ]
+        }
       ],
       "metrics": {
-        "error_rate": { "unit": "%", "baseline": 0.3, "incident": 12.4 },
-        "latency_p99": { "unit": "ms", "baseline": 180, "incident": 3150 },
-        "cpu": { "unit": "%", "baseline": 34, "incident": 31 },
-        "memory": { "unit": "%", "baseline": 52, "incident": 54 },
-        "restarts": { "unit": "count", "baseline": 0, "incident": 0 }
+        "error_rate": {
+          "unit": "%",
+          "baseline": 0.3,
+          "incident": 12.4
+        },
+        "latency_p99": {
+          "unit": "ms",
+          "baseline": 180,
+          "incident": 3150
+        },
+        "cpu": {
+          "unit": "%",
+          "baseline": 34,
+          "incident": 31
+        },
+        "memory": {
+          "unit": "%",
+          "baseline": 52,
+          "incident": 54
+        },
+        "restarts": {
+          "unit": "count",
+          "baseline": 0,
+          "incident": 0
+        }
       },
       "logs": {
         "normal": [
@@ -63,16 +111,41 @@
       "pods": "3/3 Running (1 primary, 2 replicas)",
       "uptime": "41d",
       "dependencies": [],
-      "config": { "max_connections": "500" },
+      "config": {
+        "max_connections": "500"
+      },
       "incident_started_min_ago": 21,
       "deploys": [
-        { "version": "postgres-15.6", "min_ago": 59000, "author": "dbops", "changes": ["Minor version upgrade"] }
+        {
+          "version": "postgres-15.6",
+          "min_ago": 59000,
+          "author": "dbops",
+          "changes": [
+            "Minor version upgrade"
+          ]
+        }
       ],
       "metrics": {
-        "cpu": { "unit": "%", "baseline": 28, "incident": 19 },
-        "active_connections": { "unit": "count", "baseline": 310, "incident": 34 },
-        "replication_lag_s": { "unit": "s", "baseline": 0.2, "incident": 0.2 },
-        "error_rate": { "unit": "%", "baseline": 0.0, "incident": 0.0 }
+        "cpu": {
+          "unit": "%",
+          "baseline": 28,
+          "incident": 19
+        },
+        "active_connections": {
+          "unit": "count",
+          "baseline": 310,
+          "incident": 34
+        },
+        "replication_lag_s": {
+          "unit": "s",
+          "baseline": 0.2,
+          "incident": 0.2
+        },
+        "error_rate": {
+          "unit": "%",
+          "baseline": 0.0,
+          "incident": 0.0
+        }
       },
       "logs": {
         "normal": [
@@ -88,16 +161,38 @@
       "replicas": 4,
       "pods": "4/4 Running",
       "uptime": "6d",
-      "dependencies": ["fraud-check"],
-      "config": { "UPSTREAM_TIMEOUT_MS": "1500" },
+      "dependencies": [
+        "fraud-check"
+      ],
+      "config": {
+        "UPSTREAM_TIMEOUT_MS": "1500"
+      },
       "deploys": [
-        { "version": "v3.8.1", "min_ago": 8700, "author": "ci-bot (PR #2210)", "changes": ["Retry budget tuning"] }
+        {
+          "version": "v3.8.1",
+          "min_ago": 8700,
+          "author": "ci-bot (PR #2210)",
+          "changes": [
+            "Retry budget tuning"
+          ]
+        }
       ],
       "metrics": {
-        "error_rate": { "unit": "%", "baseline": 0.2 },
-        "latency_p99": { "unit": "ms", "baseline": 240 }
+        "error_rate": {
+          "unit": "%",
+          "baseline": 0.2
+        },
+        "latency_p99": {
+          "unit": "ms",
+          "baseline": 240
+        }
       },
-      "logs": { "normal": ["INFO  POST /v1/charges 201 188ms", "INFO  POST /v1/charges 201 203ms"] }
+      "logs": {
+        "normal": [
+          "INFO  POST /v1/charges 201 188ms",
+          "INFO  POST /v1/charges 201 203ms"
+        ]
+      }
     },
     "inventory-service": {
       "owner": "team-catalog",
@@ -108,19 +203,61 @@
       "dependencies": [],
       "config": {},
       "deploys": [
-        { "version": "v5.2.0", "min_ago": 17000, "author": "ci-bot (PR #340)", "changes": ["Cache warmup on boot"] }
+        {
+          "version": "v5.2.0",
+          "min_ago": 17000,
+          "author": "ci-bot (PR #340)",
+          "changes": [
+            "Cache warmup on boot"
+          ]
+        }
       ],
       "metrics": {
-        "error_rate": { "unit": "%", "baseline": 0.1 },
-        "latency_p99": { "unit": "ms", "baseline": 60 }
+        "error_rate": {
+          "unit": "%",
+          "baseline": 0.1
+        },
+        "latency_p99": {
+          "unit": "ms",
+          "baseline": 60
+        }
       },
-      "logs": { "normal": ["INFO  GET /v1/stock/sku-123 200 9ms"] }
+      "logs": {
+        "normal": [
+          "INFO  GET /v1/stock/sku-123 200 9ms"
+        ]
+      }
     }
   },
   "expected": {
     "fix_any_of": [
-      { "tool": "rollback_deploy", "args": { "service": "checkout-service", "to_version": "v2.13.2" } }
+      {
+        "tool": "rollback_deploy",
+        "args": {
+          "service": "checkout-service",
+          "to_version": "v2.13.2"
+        }
+      }
     ],
-    "root_cause_keywords": [["pool", "db_pool_size"]]
+    "root_cause_keywords": [
+      [
+        "pool",
+        "db_pool_size"
+      ]
+    ],
+    "must_not_touch": [
+      {
+        "tool": "restart_service",
+        "args": {
+          "service": "orders-db"
+        }
+      },
+      {
+        "tool": "rollback_deploy",
+        "args": {
+          "service": "orders-db"
+        }
+      }
+    ]
   }
 }
