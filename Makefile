@@ -1,4 +1,4 @@
-.PHONY: install run dev test eval check-llm docker clean
+.PHONY: install run dev test eval check-llm docker clean quickstart
 
 install:
 	python3 -m venv .venv
@@ -27,3 +27,7 @@ docker:
 
 clean:
 	rm -rf data evals/results .pytest_cache
+
+# One command for reviewers (also: bash scripts/quickstart.sh — no Make required).
+quickstart:
+	bash scripts/quickstart.sh

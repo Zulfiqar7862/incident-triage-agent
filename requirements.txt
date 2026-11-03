@@ -1,4 +1,4 @@
-# Runtime dependencies, pinned for reproducible builds.
+# Runtime dependencies, direct dependencies pinned for reproducible builds.
 fastapi==0.162.0
 uvicorn[standard]==0.54.0
 httpx==0.28.1

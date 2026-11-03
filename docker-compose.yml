@@ -7,6 +7,7 @@ services:
     env_file: .env
     environment:
       REQUIRE_LLM: "true"        # refuse to start without a real model
+      # Set API_TOKEN in .env before exposing beyond localhost
     volumes:
       - agent-data:/data
     restart: unless-stopped
