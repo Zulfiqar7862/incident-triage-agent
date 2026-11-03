@@ -7,8 +7,6 @@ import contextlib
 import time
 
 import pytest
-from fastapi.testclient import TestClient
-
 from app.config import Settings
 from app.context import build_context, truncate_output
 from app.llm import LLMResponse, LLMTransientError, ToolCall
@@ -16,6 +14,7 @@ from app.main import create_app
 from app.runtime import RunStateError, Runtime
 from app.scripted import ScriptedPolicy
 from app.store import Store
+from fastapi.testclient import TestClient
 
 
 def make(tmp_path, delay: float = 0.0, **overrides):
@@ -289,8 +288,8 @@ def test_http_api_round_trip(tmp_path):
 def test_mid_approval_crash_does_not_duplicate_tool_result(tmp_path):
     """Crash after recording the tool result but before clearing pending must not double-append."""
     async def go():
-        from app.tools import TOOLS
         from app.llm import ToolCall
+        from app.tools import TOOLS
 
         settings, store, rt = make(tmp_path)
         rid = rt.create_run("db-pool-regression")["run_id"]

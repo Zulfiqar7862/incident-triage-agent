@@ -19,17 +19,16 @@ import json
 import logging
 import threading
 import time
-import uuid
 
 from langgraph.types import Command
 from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
 
-from .agent.graph import build_agent_graph
 from .agent.checkpointer import open_checkpointer
+from .agent.graph import build_agent_graph
 from .agent.state import make_run_id, new_run_state
 from .config import Settings
-from .context import SYSTEM_PROMPT, brief_args, build_context, one_line, truncate_output
-from .guards import LoopGuard, find_injection_markers
+from .context import SYSTEM_PROMPT, brief_args, one_line, truncate_output
+from .guards import find_injection_markers
 from .llm import LLMTransientError, ToolCall
 from .memory import make_memory
 from .mock_env import MockCluster, ToolError, ToolTransientError, load_scenario
@@ -461,7 +460,7 @@ class Runtime:
             try:
                 out = await asyncio.wait_for(asyncio.to_thread(spec.handler, cluster, args, call.id), self.settings.tool_timeout_s)
                 return (_fmt(out), False, {"attempts": attempt, "duration_ms": int((time.perf_counter() - t0) * 1000)})
-            except (ToolTransientError, asyncio.TimeoutError) as e:
+            except (TimeoutError, ToolTransientError) as e:
                 err = str(e) or f"timed out after {self.settings.tool_timeout_s}s"
                 if attempt == max_attempts:
                     return (f"{call.name} failed after {attempt} attempts: {err}. The backend may be degraded; "

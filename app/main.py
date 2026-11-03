@@ -9,7 +9,7 @@ import logging
 import re
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
@@ -19,11 +19,11 @@ from .config import Settings
 from .context import SYSTEM_PROMPT, build_context
 from .llm import make_llm
 from .logging_setup import configure_logging
-from .observability.tracing import configure_tracing, shutdown_tracing
+from .mock_env import list_scenarios
 from .observability.langfuse_tracer import configure_langfuse, shutdown_langfuse
 from .observability.metrics import render_metrics, set_event_counts, set_run_counts
-from .mock_env import list_scenarios
-from .runtime import InvalidInput, NotFound, Runtime, RunStateError, TooBusy
+from .observability.tracing import configure_tracing, shutdown_tracing
+from .runtime import InvalidInput, NotFound, RunStateError, Runtime, TooBusy
 from .store import Store
 from .tools import tool_schemas
 
@@ -36,7 +36,7 @@ class CreateRun(BaseModel):
 
 
 class Approve(BaseModel):
-    args: Optional[dict[str, Any]] = None
+    args: dict[str, Any] | None = None
 
 
 class Reject(BaseModel):

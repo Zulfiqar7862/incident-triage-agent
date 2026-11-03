@@ -154,7 +154,7 @@ def build_context(state: dict, settings: Settings) -> tuple[list[dict], dict]:
     for i, g in enumerate(groups):
         if i < len(groups) - keep:
             new = [_shrink(m) for m in g]
-            shrunk += sum(1 for a, b in zip(g, new) if a is not b)
+            shrunk += sum(1 for a, b in zip(g, new, strict=True) if a is not b)
             compacted.append(new)
         else:
             compacted.append(g)

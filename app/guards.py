@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 from collections import Counter
 
 # Phrases that show up in injection attempts inside tool output / user content.

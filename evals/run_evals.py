@@ -107,7 +107,6 @@ async def judge_run(llm, scenario: dict, st: dict) -> dict:
         actions=json.dumps(actions[-20:], default=str)[:3000],
     )
     # Reuse the provider with no tools — a plain user turn.
-    from app.llm import LLMResponse
     class _NoTools:
         pass
     try:

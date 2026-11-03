@@ -15,7 +15,6 @@ import time
 
 import httpx
 import pytest
-
 from app.config import ConfigError, Settings
 from app.llm import GEMINI_DUMMY_SIGNATURE, GeminiLLM, LLMError, make_llm, to_gemini
 from app.runtime import Runtime

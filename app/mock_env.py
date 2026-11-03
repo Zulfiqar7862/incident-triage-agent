@@ -11,12 +11,12 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
 
 SCENARIO_DIR = Path(__file__).resolve().parent.parent / "scenarios"
-NOW = datetime(2026, 11, 3, 14, 30, 0, tzinfo=timezone.utc)  # fixed "now" keeps output deterministic
+NOW = datetime(2026, 11, 3, 14, 30, 0, tzinfo=UTC)  # fixed "now" keeps output deterministic
 POD_SUFFIXES = ["7f9c4-a1b2", "7f9c4-c3d4", "7f9c4-e5f6"]
 
 

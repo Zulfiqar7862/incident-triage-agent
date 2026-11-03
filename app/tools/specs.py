@@ -7,8 +7,9 @@ a JSON schema the model sees, and a kind that decides how the runtime treats it:
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -66,9 +67,9 @@ class Hypothesis(BaseModel):
 
 
 class MemoryArgs(BaseModel):
-    plan: Optional[list[str]] = Field(None, description="Replace the investigation plan")
-    hypotheses: Optional[list[Hypothesis]] = Field(None, description="Hypotheses to add or update (matched by id)")
-    note: Optional[str] = Field(None, description="A fact worth keeping for later steps")
+    plan: list[str] | None = Field(None, description="Replace the investigation plan")
+    hypotheses: list[Hypothesis] | None = Field(None, description="Hypotheses to add or update (matched by id)")
+    note: str | None = Field(None, description="A fact worth keeping for later steps")
 
 
 class AskArgs(BaseModel):
@@ -79,7 +80,7 @@ class FinishArgs(BaseModel):
     summary: str = Field(description="Two or three sentences for the incident channel")
     root_cause: str
     resolved: bool = Field(description="True only if you verified recovery with metrics")
-    fix_applied: Optional[str] = None
+    fix_applied: str | None = None
     follow_ups: list[str] = Field(default_factory=list)
 
 
@@ -90,7 +91,7 @@ class ToolSpec:
     description: str
     kind: Literal["read", "write", "meta"]
     model: type[BaseModel]
-    handler: Optional[Callable[[Any, Any, str], Any]] = None  # (cluster, args, call_id) -> result
+    handler: Callable[[Any, Any, str], Any] | None = None  # (cluster, args, call_id) -> result
 
     def parse(self, raw: dict | None) -> BaseModel:
         try:

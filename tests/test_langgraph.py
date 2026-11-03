@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import asyncio
 
-import pytest
-
 from app.agent.graph import build_agent_graph, graph_mermaid
 from app.config import Settings
 from app.runtime import Runtime
