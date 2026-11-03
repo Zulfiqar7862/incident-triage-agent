@@ -39,10 +39,6 @@ class LLMResponse:
     raw: dict | None = None  # provider data to replay on the next request
 
 
-class LLMTransientError(Exception):
-    """Rate limit, overload, timeout: the runtime retries with backoff."""
-
-
 class LLMError(Exception):
     """Non-retryable (bad request, auth, safety block)."""
 
@@ -54,13 +50,45 @@ def _client(timeout: float, transport: httpx.AsyncBaseTransport | None) -> httpx
     return httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=10.0), transport=transport)
 
 
+class LLMTransientError(Exception):
+    """Rate limit, overload, timeout: the runtime retries with backoff."""
+
+    def __init__(self, message: str, retry_after_s: float | None = None):
+        super().__init__(message)
+        self.retry_after_s = retry_after_s
+
+
+def _retry_after_seconds(response: httpx.Response) -> float | None:
+    """Prefer Retry-After, then Gemini's retryDelay in the error body."""
+    ra = response.headers.get("retry-after")
+    if ra:
+        try:
+            return max(0.0, float(ra))
+        except ValueError:
+            pass
+    try:
+        details = (response.json().get("error") or {}).get("details") or []
+    except ValueError:
+        details = []
+    for d in details:
+        delay = d.get("retryDelay") if isinstance(d, dict) else None
+        if isinstance(delay, str) and delay.endswith("s"):
+            try:
+                return max(0.0, float(delay[:-1]))
+            except ValueError:
+                pass
+    # No Retry-After / retryDelay: let the runtime decide. It lengthens backoff when
+    # the error text mentions quota, without forcing a 30s sleep that breaks unit tests.
+    return None
+
+
 async def _post(client: httpx.AsyncClient, url: str, headers: dict, payload: dict) -> dict:
     try:
         r = await client.post(url, headers=headers, json=payload)
     except httpx.TransportError as e:  # includes timeouts
         raise LLMTransientError(f"network error: {e!r}") from e
     if r.status_code in RETRYABLE_STATUS:
-        raise LLMTransientError(f"HTTP {r.status_code}: {r.text[:300]}")
+        raise LLMTransientError(f"HTTP {r.status_code}: {r.text[:300]}", _retry_after_seconds(r))
     if r.status_code >= 400:
         raise LLMError(f"HTTP {r.status_code}: {r.text[:800]}")
     try:

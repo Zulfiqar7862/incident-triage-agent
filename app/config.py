@@ -48,6 +48,7 @@ class Settings:
     llm_timeout_s: float = 120.0
     llm_max_attempts: int = 4
     llm_backoff_s: float = 1.0
+    llm_max_backoff_s: float = 60.0  # cap on Retry-After / quota backoff
     llm_max_output_tokens: int = 8192
     # Refuse to start without a real model (no silent fallback to the offline policy).
     require_llm: bool = False
@@ -55,8 +56,11 @@ class Settings:
     # Run guardrails
     max_steps: int = 25
     max_run_tokens: int = 400_000
+    max_run_cost_usd: float = 1.0
     min_write_confidence: float = 0.5
     max_concurrent_runs: int = 10
+    max_identical_tool_calls: int = 3
+    budget_alert_ratio: float = 0.8  # emit budget.alert when usage crosses this fraction
 
     # Context engineering
     context_budget_tokens: int = 24_000
@@ -79,6 +83,7 @@ class Settings:
     api_token: str = ""          # when set, every /api request needs "Authorization: Bearer <token>"
     log_format: str = "text"     # text | json
     log_level: str = "INFO"
+    otlp_endpoint: str = ""      # e.g. http://localhost:4318 — empty disables export
 
     # Offline scripted policy: delay per "LLM" call so the UI is watchable
     scripted_delay_s: float = 0.8
@@ -105,9 +110,14 @@ class Settings:
         if self.log_format not in ("text", "json"):
             problems.append("LOG_FORMAT must be text or json")
         for name in ("max_steps", "max_run_tokens", "context_budget_tokens", "tool_output_max_chars",
-                     "max_concurrent_runs", "tool_max_attempts", "llm_max_attempts"):
+                     "max_concurrent_runs", "tool_max_attempts", "llm_max_attempts",
+                     "max_identical_tool_calls"):
             if getattr(self, name) <= 0:
                 problems.append(f"{name.upper()} must be positive")
+        if self.max_run_cost_usd < 0:
+            problems.append("MAX_RUN_COST_USD must be >= 0 (0 disables the cost budget)")
+        if not 0 < self.budget_alert_ratio <= 1:
+            problems.append("BUDGET_ALERT_RATIO must be between 0 and 1")
         if not 0 <= self.min_write_confidence <= 1:
             problems.append("MIN_WRITE_CONFIDENCE must be between 0 and 1")
         if self.api_token and len(self.api_token) < 16:
