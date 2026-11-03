@@ -13,7 +13,7 @@ test:
   script:
     - pip install -r requirements-dev.txt
     - ruff check app tests evals scripts
-    - mypy -p app || true
+    - mypy -p app
     - pytest -q
     - TOOL_BACKOFF_S=0.01 python -m evals.run_evals --provider scripted
 

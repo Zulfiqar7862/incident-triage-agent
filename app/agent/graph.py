@@ -31,10 +31,11 @@ def _after_gate(state: AgentState) -> Literal["prepare", "__end__"]:
 def build_agent_graph(checkpointer: Any = True):
     """Build and compile the agent graph."""
     g: StateGraph = StateGraph(AgentState)
-    g.add_node("prepare", prepare_node)
-    g.add_node("act", act_node)
-    g.add_node("approval", approval_node)
-    g.add_node("input", input_node)
+    # LangGraph's NodeInputT is stricter than our plain-dict AgentState TypedDict.
+    g.add_node("prepare", prepare_node)  # type: ignore[type-var]
+    g.add_node("act", act_node)  # type: ignore[type-var]
+    g.add_node("approval", approval_node)  # type: ignore[type-var]
+    g.add_node("input", input_node)  # type: ignore[type-var]
 
     g.add_edge(START, "prepare")
     g.add_conditional_edges("prepare", _after_prepare, {"act": "act", "__end__": END})

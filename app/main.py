@@ -12,7 +12,9 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .config import Settings
@@ -24,7 +26,7 @@ from .observability.langfuse_tracer import configure_langfuse, shutdown_langfuse
 from .observability.metrics import render_metrics, set_event_counts, set_run_counts
 from .observability.tracing import configure_tracing, shutdown_tracing
 from .runtime import InvalidInput, NotFound, RunStateError, Runtime, TooBusy
-from .store import Store
+from .store import CheckpointConflict, Store
 from .tools import tool_schemas
 
 STATIC = Path(__file__).resolve().parent.parent / "static"
@@ -36,15 +38,15 @@ class CreateRun(BaseModel):
 
 
 class Approve(BaseModel):
-    args: dict[str, Any] | None = None
+    args: dict[str, Any] | None = Field(default=None)
 
 
 class Reject(BaseModel):
-    feedback: str = Field("", max_length=2000)
+    feedback: str = Field(default="", max_length=2000)
 
 
 class Message(BaseModel):
-    text: str = Field(max_length=4000)
+    text: str = Field(..., min_length=1, max_length=4000)
 
 
 def create_app(settings: Settings | None = None, llm=None) -> FastAPI:
@@ -107,13 +109,48 @@ def create_app(settings: Settings | None = None, llm=None) -> FastAPI:
     async def _busy(_: Request, exc: TooBusy):
         return JSONResponse({"detail": str(exc)}, status_code=429, headers={"Retry-After": "30"})
 
+    @app.exception_handler(CheckpointConflict)
+    async def _cas(_: Request, exc: CheckpointConflict):
+        return JSONResponse({"detail": str(exc)}, status_code=409)
+
+    origins = [o.strip() for o in (settings.cors_origins or "").split(",") if o.strip()]
+    if origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=origins,
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "OPTIONS"],
+            allow_headers=["Authorization", "Content-Type", "X-Operator", "Last-Event-ID"],
+        )
+
     @app.middleware("http")
-    async def security_headers(request: Request, call_next):
+    async def request_guards(request: Request, call_next):
+        # Reject oversized bodies early (Content-Length). Multipart not used.
+        cl = request.headers.get("content-length")
+        if cl and cl.isdigit() and int(cl) > settings.max_request_bytes:
+            return JSONResponse({"detail": f"Request body exceeds {settings.max_request_bytes} bytes"}, status_code=413)
         response = await call_next(request)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
+        response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com; "
+            "img-src 'self' data:; "
+            "connect-src 'self'; "
+            "frame-ancestors 'none'",
+        )
+        if request.url.path.startswith("/api/") or request.url.path in ("/healthz", "/readyz", "/metrics"):
+            response.headers.setdefault("Cache-Control", "no-store")
         return response
+
+    # Serve CSS/JS modules next to index.html (no build step).
+    if STATIC.is_dir():
+        app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
     # ---- auth ----------------------------------------------------------------------------------
     def require_auth(request: Request) -> str:
@@ -232,12 +269,14 @@ def create_app(settings: Settings | None = None, llm=None) -> FastAPI:
         return runtime.public(runtime.get(run_id))
 
     @app.post("/api/runs/{run_id}/approve")
-    async def approve(run_id: str, body: Approve = Approve(), actor: str = Depends(require_auth)):
+    async def approve(run_id: str, body: Approve | None = None, actor: str = Depends(require_auth)):
+        body = body or Approve()
         runtime.approve(run_id, body.args, actor=actor)
         return _ok(run_id)
 
     @app.post("/api/runs/{run_id}/reject")
-    async def reject(run_id: str, body: Reject = Reject(), actor: str = Depends(require_auth)):
+    async def reject(run_id: str, body: Reject | None = None, actor: str = Depends(require_auth)):
+        body = body or Reject()
         runtime.reject(run_id, body.feedback, actor=actor)
         return _ok(run_id)
 

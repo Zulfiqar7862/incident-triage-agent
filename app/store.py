@@ -49,6 +49,10 @@ CREATE TABLE IF NOT EXISTS memories (
 """
 
 
+class CheckpointConflict(Exception):
+    """Optimistic concurrency failure: another writer advanced checkpoint_version."""
+
+
 class Store:
     def __init__(self, path: str):
         if path != ":memory:":
@@ -78,13 +82,41 @@ class Store:
             (state["run_id"], state["scenario_id"], state["title"], state["status"], now, now, 1, json.dumps(state)),
         )
 
-    def save(self, state: dict) -> None:
-        """Write a checkpoint. The latest checkpoint is the run's source of truth."""
-        state["checkpoint_version"] = state.get("checkpoint_version", 0) + 1
-        self._exec(
-            "UPDATE runs SET status=?, updated_at=?, checkpoint_version=?, state=? WHERE id=?",
-            (state["status"], time.time(), state["checkpoint_version"], json.dumps(state), state["run_id"]),
-        )
+    def save(self, state: dict, *, cas: bool = True) -> None:
+        """Write a checkpoint. The latest checkpoint is the run's source of truth.
+
+        When ``cas`` is True (default), the UPDATE is conditioned on the
+        in-memory ``checkpoint_version`` matching the row — a second writer that
+        raced ahead raises ``CheckpointConflict`` instead of silently clobbering.
+        """
+        expected = int(state.get("checkpoint_version") or 0)
+        new_ver = expected + 1
+        # Persist the new version inside the JSON blob as well as the column.
+        to_write = dict(state)
+        to_write["checkpoint_version"] = new_ver
+        payload = json.dumps(to_write)
+        now = time.time()
+        with self._lock:
+            if cas:
+                cur = self._conn.execute(
+                    "UPDATE runs SET status=?, updated_at=?, checkpoint_version=?, state=? "
+                    "WHERE id=? AND checkpoint_version=?",
+                    (to_write["status"], now, new_ver, payload, to_write["run_id"], expected),
+                )
+                if cur.rowcount != 1:
+                    row = self._conn.execute(
+                        "SELECT checkpoint_version FROM runs WHERE id=?", (to_write["run_id"],)
+                    ).fetchone()
+                    have = row["checkpoint_version"] if row else None
+                    raise CheckpointConflict(
+                        f"checkpoint CAS failed for {to_write['run_id']}: expected v{expected}, have v{have}"
+                    )
+            else:
+                self._conn.execute(
+                    "UPDATE runs SET status=?, updated_at=?, checkpoint_version=?, state=? WHERE id=?",
+                    (to_write["status"], now, new_ver, payload, to_write["run_id"]),
+                )
+        state["checkpoint_version"] = new_ver
 
     def load(self, run_id: str) -> dict | None:
         rows = self._rows("SELECT state FROM runs WHERE id=?", (run_id,))

@@ -14,6 +14,8 @@ Orchestration
 """
 from __future__ import annotations
 
+from typing import cast
+
 import asyncio
 import json
 import logging
@@ -261,6 +263,7 @@ class Runtime:
                 raise RunStateError(f"Run is {st['status']}; nothing is waiting for approval")
             if run_id in self._pending_resume:
                 raise RunStateError(f"Run is {st['status']}; nothing is waiting for approval")
+            assert p is not None  # narrowed by can_finish
             spec = TOOLS[p["tool"]]
             base_args = p.get("final_args") or p["args"]
             try:
@@ -453,12 +456,15 @@ class Runtime:
             args = spec.parse(call.args)
         except ToolArgsError as e:
             return (f"Invalid arguments for {call.name}: {e}. Check the tool schema and try again.", True, {"attempts": 1})
+        handler = spec.handler
+        if handler is None:
+            return (f"{call.name} has no handler", True, {"attempts": 1})
         cluster = self._cluster(st)
         t0 = time.perf_counter()
         max_attempts = self.settings.tool_max_attempts
         for attempt in range(1, max_attempts + 1):
             try:
-                out = await asyncio.wait_for(asyncio.to_thread(spec.handler, cluster, args, call.id), self.settings.tool_timeout_s)
+                out = await asyncio.wait_for(asyncio.to_thread(handler, cluster, args, call.id), self.settings.tool_timeout_s)
                 return (_fmt(out), False, {"attempts": attempt, "duration_ms": int((time.perf_counter() - t0) * 1000)})
             except (TimeoutError, ToolTransientError) as e:
                 err = str(e) or f"timed out after {self.settings.tool_timeout_s}s"
@@ -472,6 +478,7 @@ class Runtime:
                 await asyncio.sleep(delay)
             except ToolError as e:
                 return (f"Error: {e}", True, {"attempts": attempt, "duration_ms": int((time.perf_counter() - t0) * 1000)})
+        return (f"{call.name} failed after {max_attempts} attempts", True, {"attempts": max_attempts})
 
     def _gate(self, st: dict, c: ToolCall, spec: ToolSpec, step: int):
         try:
@@ -490,8 +497,10 @@ class Runtime:
                 "step": step, "requested_at": time.time()}
 
     def _apply_memory(self, st: dict, c: ToolCall, spec: ToolSpec) -> tuple:
+        from .tools.specs import MemoryArgs
+
         try:
-            a = spec.parse(c.args)
+            a = cast(MemoryArgs, spec.parse(c.args))
         except ToolArgsError as e:
             return (f"Invalid arguments for update_working_memory: {e}", True, {})
         changed = []

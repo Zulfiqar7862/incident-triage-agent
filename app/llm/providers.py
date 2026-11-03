@@ -126,7 +126,7 @@ def to_gemini(messages: list[dict]) -> list[dict]:
             else:
                 parts = [{"text": m["text"]}] if m.get("text") else []
                 for i, c in enumerate(m.get("tool_calls", [])):
-                    part = {"functionCall": {"name": c["name"], "args": c["args"]}}
+                    part: dict = {"functionCall": {"name": c["name"], "args": c["args"]}}
                     if i == 0:
                         part["thoughtSignature"] = GEMINI_DUMMY_SIGNATURE
                     parts.append(part)
@@ -298,6 +298,59 @@ class OpenAILLM:
                            usage.get("completion_tokens", 0), data.get("model", self.model))
 
 
+
+class GeminiWithFallback:
+    """Primary Gemini model with automatic fallback on 429/quota exhaustion.
+
+    Free-tier flash often returns 429; flash-lite usually still works. On a
+    retryable 429 (or quota-flavoured transient error) we switch models for the
+    rest of the process lifetime and emit a clear log line. Non-quota transient
+    errors still bubble so the runtime can back off.
+    """
+
+    provider = "gemini"
+
+    def __init__(self, primary: GeminiLLM, fallback: GeminiLLM | None):
+        self._primary = primary
+        self._fallback = fallback
+        self._active = primary
+        self._switched = False
+
+    @property
+    def model(self) -> str:
+        return self._active.model
+
+    @property
+    def _client(self):
+        return self._active._client
+
+    async def complete(self, system: str, messages: list[dict], tools: list[dict], state: dict | None = None) -> LLMResponse:
+        try:
+            return await self._active.complete(system, messages, tools, state)
+        except LLMTransientError as e:
+            if (
+                self._fallback is not None
+                and not self._switched
+                and self._active is self._primary
+                and self._is_quota(e)
+            ):
+                import logging
+                logging.getLogger("llm").warning(
+                    "gemini primary model %s hit quota/429; falling back to %s",
+                    self._primary.model,
+                    self._fallback.model,
+                )
+                self._active = self._fallback
+                self._switched = True
+                return await self._active.complete(system, messages, tools, state)
+            raise
+
+    @staticmethod
+    def _is_quota(e: LLMTransientError) -> bool:
+        msg = str(e).lower()
+        return "429" in msg or "quota" in msg or "rate limit" in msg or "resource_exhausted" in msg
+
+
 # ---- factory -----------------------------------------------------------------------------------
 def _gemini_key() -> str:
     return os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
@@ -325,7 +378,12 @@ def make_llm(settings: Settings, transport: httpx.AsyncBaseTransport | None = No
         key = _gemini_key()
         if not key:
             raise ConfigError("LLM_PROVIDER=gemini but GEMINI_API_KEY is not set")
-        return GeminiLLM(settings.gemini_model, key, settings.llm_timeout_s, settings.llm_max_output_tokens, transport)
+        primary = GeminiLLM(settings.gemini_model, key, settings.llm_timeout_s, settings.llm_max_output_tokens, transport)
+        fb_name = (settings.gemini_fallback_model or "").strip()
+        if fb_name and fb_name != settings.gemini_model:
+            fallback = GeminiLLM(fb_name, key, settings.llm_timeout_s, settings.llm_max_output_tokens, transport)
+            return GeminiWithFallback(primary, fallback)
+        return primary
     if provider == "anthropic":
         if not os.getenv("ANTHROPIC_API_KEY"):
             raise ConfigError("LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY is not set")

@@ -122,7 +122,8 @@ class ScriptedPolicy:
                     )
                 verb = "Reading logs" if need[0].name == "search_logs" else "Gathering health, metrics and deploy history"
                 return _resp(f"{verb} for {target}.", need)
-            logs = C.last("search_logs", service=target)["content"]
+            last_logs = C.last("search_logs", service=target)
+            logs = (last_logs or {}).get("content") or ""
             m = re.search(r"upstream ([a-z0-9-]+)", logs)
             if m and m.group(1) in self._deps(C, target) and m.group(1) not in chain:
                 target = m.group(1)
@@ -194,10 +195,18 @@ class ScriptedPolicy:
         return json.loads(c["content"]).get("dependencies", []) if c else []
 
     def _propose(self, C: _Calls, svc: str, target: str) -> LLMResponse:
-        logs = C.last("search_logs", service=target)["content"]
+        logs = ((C.last("search_logs", service=target) or {}).get("content") or "")
         low = logs.lower()
-        desc = json.loads(C.last("describe_service", service=target)["content"])
-        deploys = json.loads(C.last("get_recent_deploys", service=target)["content"])["deploys"]
+        desc_raw = C.last("describe_service", service=target)
+        deploy_raw = C.last("get_recent_deploys", service=target)
+        if not desc_raw or not deploy_raw:
+            return _resp("Missing describe/deploys evidence; finishing without a change.", [
+                _call("finish", summary="Could not gather enough evidence to propose a change.",
+                      root_cause="incomplete investigation", resolved=False,
+                      follow_ups=["Retry triage with a live model or inspect the simulator state"]),
+            ])
+        desc = json.loads(desc_raw["content"])
+        deploys = json.loads(deploy_raw["content"])["deploys"]
 
         if "outofmemory" in low or "oomkilled" in low or "crashloop" in desc["pods"].lower():
             evidence = _first_line(logs, ("outofmemoryerror", "oomkilled"))

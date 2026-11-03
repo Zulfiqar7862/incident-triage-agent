@@ -21,7 +21,7 @@ def search_runbooks(query: str, top_k: int = 2) -> list[dict]:
     q = _tokenize(query)
     if not q:
         return []
-    scored: list[tuple[float, Path, str]] = []
+    scored: list[tuple[int, Path, str]] = []
     for path in sorted(RUNBOOK_DIR.glob("*.md")):
         body = path.read_text(encoding="utf-8")
         tokens = _tokenize(path.stem.replace("-", " ") + " " + body)

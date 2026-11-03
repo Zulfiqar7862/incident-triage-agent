@@ -54,6 +54,8 @@ class Settings(BaseSettings):
 
     llm_provider: Literal["auto", "gemini", "anthropic", "openai", "scripted"] = "auto"
     gemini_model: str = "gemini-3.5-flash"
+    # Used automatically when the primary Gemini model returns 429/quota errors.
+    gemini_fallback_model: str = "gemini-3.5-flash-lite"
     anthropic_model: str = "claude-sonnet-5-5"
     openai_model: str = "gpt-4.1"
     llm_timeout_s: float = 120.0
@@ -85,6 +87,9 @@ class Settings(BaseSettings):
     cost_out_per_mtok: float = 3.0
 
     api_token: str = ""
+    # Comma-separated browser origins allowed to call the API (empty = same-origin only).
+    cors_origins: str = ""
+    max_request_bytes: int = 1_048_576
     log_format: Literal["text", "json"] = "text"
     log_level: str = "INFO"
     otlp_endpoint: str = ""
@@ -118,6 +123,7 @@ class Settings(BaseSettings):
             "tool_max_attempts",
             "llm_max_attempts",
             "max_identical_tool_calls",
+            "max_request_bytes",
         ):
             if getattr(self, name) <= 0:
                 problems.append(f"{name.upper()} must be positive")
@@ -131,10 +137,13 @@ class Settings(BaseSettings):
             raise ConfigError("; ".join(problems))
         return self
 
-    def validate(self) -> None:
-        """Back-compat for callers that still invoke Settings.validate()."""
-        # model_validator already ran; re-run via model_validate for mutated instances
+    def revalidate(self) -> None:
+        """Re-run validators after in-place mutation (tests). Prefer model_validate for new code."""
         type(self).model_validate(self.model_dump())
+
+    # Back-compat alias — not BaseModel.validate (different signature).
+    def validate(self) -> None:  # type: ignore[override]
+        self.revalidate()
 
     @classmethod
     def settings_customise_sources(cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings):

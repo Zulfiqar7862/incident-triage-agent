@@ -108,10 +108,14 @@ async def approval_node(state: dict, config: RunnableConfig) -> dict[str, Any]:
     st["pending"] = p
     rt.store.save(st)
 
-    try:
-        content, is_error = _fmt(spec.handler(rt._cluster(st), args, p["tool_call_id"])), False
-    except ToolError as e:
-        content, is_error = f"Execution failed: {e}", True
+    handler = spec.handler
+    if handler is None:
+        content, is_error = f"{p['tool']} has no handler", True
+    else:
+        try:
+            content, is_error = _fmt(handler(rt._cluster(st), args, p["tool_call_id"])), False
+        except ToolError as e:
+            content, is_error = f"Execution failed: {e}", True
 
     if rt._tool_result_recorded(st, p["tool_call_id"]):
         st["pending"] = None
