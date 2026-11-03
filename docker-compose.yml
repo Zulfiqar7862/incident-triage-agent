@@ -1,0 +1,15 @@
+services:
+  agent:
+    build: .
+    image: incident-agent:latest
+    ports:
+      - "127.0.0.1:8000:8000"   # bind to localhost; put a TLS proxy in front to expose it
+    env_file: .env
+    environment:
+      REQUIRE_LLM: "true"        # refuse to start without a real model
+    volumes:
+      - agent-data:/data
+    restart: unless-stopped
+    stop_grace_period: 30s
+volumes:
+  agent-data:

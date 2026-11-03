@@ -6,22 +6,27 @@ An AI agent that takes a production alert, investigates it with tools, finds the
 
 ## Quick start
 
-Requires Python 3.11+.
+Requires Python 3.11+ and a Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey).
 
 ```bash
-make install          # or: python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-cp .env.example .env  # add ANTHROPIC_API_KEY or OPENAI_API_KEY
-make run              # or: .venv/bin/uvicorn app.main:app --port 8000
+make install                 # creates .venv and installs pinned dependencies
+cp .env.example .env         # set GEMINI_API_KEY (and API_TOKEN if anyone else can reach the port)
+make check-llm               # live two-step tool-calling check against your key and model
+make run                     # http://localhost:8000
 ```
 
-Open http://localhost:8000, pick a scenario, and click **Start triage**.
+Pick a scenario and click **Start triage**. Enter your name in the header first: approvals are recorded against it in the audit log.
 
-With no API key, the app runs an **offline scripted policy** instead of a model, and the header says so. It is a short, hand-written decision procedure, not the agent's intelligence. It exists so that the UI, runtime, tests and evals all work without a key, while exercising exactly the same tools, retries, approval gates and checkpoints a real model drives.
+`make check-llm` is the fastest way to confirm your key, model name and network all work. It runs a real call, tool result, call exchange, which is exactly the pattern that breaks when a provider's multi-turn rules aren't met. If it passes, the agent will run.
+
+The default model is `gemini-3.5-flash`. Set `GEMINI_MODEL` to use another one. Anthropic and OpenAI keys work too (`LLM_PROVIDER` picks explicitly; otherwise the first key found wins, Gemini first).
+
+With no key at all, the app runs an **offline scripted policy** instead of a model, and the header says so. It is a short, hand-written decision procedure, not the agent's intelligence; it lets the UI, tests and CI run without a key. Set `REQUIRE_LLM=true` to forbid that fallback (Compose does this by default).
 
 ```bash
-make test   # 14 tests, ~2 seconds, no API key needed
-make eval   # golden-set evals against the configured model
-docker build -t incident-agent . && docker run -p 8000:8000 --env-file .env incident-agent
+make test     # 28 tests, ~3 seconds, no key needed
+make eval     # golden-set evals against your configured model
+make docker   # docker compose up --build
 ```
 
 ## Why incident triage
@@ -42,7 +47,7 @@ Of the suggested use cases, triage forces the most real agent behaviour into a 2
 ## Architecture
 
 ```
- Browser UI ──REST──▶ FastAPI ──▶ Runtime ──▶ LLM adapter (Anthropic | OpenAI | offline policy)
+ Browser UI ──REST──▶ FastAPI ──▶ Runtime ──▶ LLM adapter (Gemini | Anthropic | OpenAI | offline policy)
      ▲                   │           │
      └──── SSE ◀─────────┘           ├──▶ Tool registry ──▶ Simulated cluster (state lives in the checkpoint)
        (event log)                   ├──▶ Context builder (working memory + compacted transcript)
@@ -54,7 +59,9 @@ Of the suggested use cases, triage forces the most real agent behaviour into a 2
 | `app/runtime.py` | Run lifecycle, the agent loop, retries, human gates, checkpoints, events |
 | `app/context.py` | What the model sees each step: system prompt, working memory, compaction |
 | `app/tools.py` | Typed tool schemas, split into read, write, and meta kinds |
-| `app/llm.py` | Provider-neutral message format plus Anthropic and OpenAI adapters |
+| `app/llm.py` | Provider-neutral message format plus Gemini, Anthropic and OpenAI adapters |
+| `app/main.py`, `app/logging_setup.py` | HTTP API, auth, health and metrics; structured logging |
+| `scripts/check_llm.py` | Live provider check (`make check-llm`) |
 | `app/store.py` | SQLite persistence |
 | `app/memory.py` | Long-term memory promotion and redaction |
 | `app/mock_env.py`, `scenarios/` | Deterministic simulated environment |
@@ -123,15 +130,23 @@ Hitting any of these moves the run to `needs_attention`, and resuming it grants 
 
 **Long-term memory is deliberately small.** Only resolved incidents are promoted, as a redacted one-liner: service, root cause, and fix. Secrets, emails, card numbers and IPs are stripped. Raw transcripts and logs are never kept. Memories expire after 30 days and are recalled by service with a "may be stale, verify" label. Run a scenario twice to see it recalled.
 
+**One message format, one adapter per provider, provider state checkpointed.** The runtime stores history in a neutral format and each adapter translates it. Gemini 3 attaches an encrypted "thought signature" to function calls and rejects the next request with a 400 if it isn't sent back exactly. The Gemini adapter keeps the model's raw response parts on the assistant turn in the checkpoint and replays them verbatim, so signatures survive context compaction, restarts and resumes. History written by another provider gets Gemini's documented placeholder signature, so you can switch providers mid-run. Rate limits, overloads and timeouts are retried with backoff; bad requests, safety blocks and auth errors fail the run with the provider's message, and the run can be resumed from its checkpoint once fixed.
+
 **Observability is built into the event log.** Every model call, tool call, retry, policy decision, operator decision and status change is an append-only event in SQLite. The UI's live trace is that log streamed over server-sent events, so a reconnecting browser or a later investigation sees exactly what happened. Each model call records tokens, latency, estimated cost, and context-window usage. Events are also logged as structured JSON for whatever collector you run.
 
 ## API
 
+When `API_TOKEN` is set, every `/api` request needs `Authorization: Bearer <token>`. The SSE stream also accepts `?token=` because browsers' EventSource can't send headers; the token is redacted from access logs. An optional `X-Operator` header names the person acting, and is recorded in the audit log for approvals, rejections and messages.
+
 ```
+GET  /healthz                          liveness (no auth)
+GET  /readyz                           readiness: database reachable (no auth)
+GET  /metrics                          Prometheus text: runs by status, events by type, active runs (no auth, no run data)
+
 GET  /api/health                       provider, model, limits
 GET  /api/scenarios                    available incidents
 GET  /api/tools                        tool schemas (name, kind, JSON schema)
-POST /api/runs                         {"scenario_id"} → start a run
+POST /api/runs                         {"scenario_id"} → start a run (429 when MAX_CONCURRENT_RUNS are active)
 GET  /api/runs                         list
 GET  /api/runs/{id}                    state (?include_history=true for the raw transcript)
 GET  /api/runs/{id}/context            the exact prompt the next step would send
@@ -143,52 +158,72 @@ POST /api/runs/{id}/message            answer a question, or guide the agent at 
 POST /api/runs/{id}/pause | resume | cancel
 ```
 
-Errors use 404 for unknown runs, 409 for actions invalid in the current state, and 422 for bad input. Interactive docs are at `/docs`.
+Errors use 401 for a missing or wrong token, 404 for unknown runs, 409 for actions invalid in the current state, 422 for bad input, and 429 with `Retry-After` when the concurrency limit is reached. Interactive docs are at `/docs`.
 
 ## Testing and evals
 
-`make test` drives the real runtime with the offline policy and a fake model. It covers:
+`make test` runs 28 tests in about 3 seconds with no API key.
 
+**Agent behaviour**, driven through the real runtime by the offline policy and a fake model:
 - both scenarios end to end;
 - rejecting a change, and editing its arguments before approving;
 - crash mid-step, then recover and resume without redoing earlier work;
 - a pending approval surviving a restart, and double approval being refused;
-- pause and resume;
-- the step budget;
-- low-confidence changes being blocked;
-- model-call retry;
-- invalid tool arguments;
-- truncation;
-- compaction that respects the budget and never splits tool pairs;
-- long-term memory recall;
-- an HTTP round trip.
+- pause and resume, the step budget, low-confidence changes being blocked, invalid tool arguments;
+- truncation, compaction that respects the budget and never splits tool pairs, long-term memory recall.
+
+**Gemini**, against a mocked Generative Language API that enforces the real API's rules (signatures replayed exactly, every call answered in order, issued ids echoed back, `parametersJsonSchema` used) and returns the same 400 when they're broken:
+- a full run with an approval, including a 429 and a 503 that must be retried;
+- signatures surviving a server restart between steps;
+- a bad request failing the run clearly, then resuming;
+- safety blocks, malformed function calls, thought summaries, and history from another provider;
+- fail-fast configuration;
+- `make check-llm` itself.
+
+The Gemini tests were mutation-checked: deliberately dropping signatures or call ids from the adapter makes them fail.
+
+**Operations:** auth on every endpoint except probes, audit identity, security headers, metrics, input limits, the concurrency limit, and graceful shutdown.
 
 `make eval` runs the golden set against whichever model is configured, auto-approving changes, and scores each run against simulator ground truth:
-
 - whether the incident was really resolved;
 - whether the first proposed fix was right;
 - how many wrong production changes were made;
 - whether the root cause was named;
 - steps, tokens, cost and time.
 
-Run it with `--repeat 5` before and after any prompt or model change.
+Models are non-deterministic, so run `.venv/bin/python -m evals.run_evals --repeat 5` before and after any prompt or model change. CI (`.github/workflows/ci.yml`) runs the tests, the offline evals and a Docker build on every push.
+
+## Running in production
+
+**Deploy.** `docker compose up --build` builds a non-root image with a health check, stores the database on a volume, refuses to start without a model (`REQUIRE_LLM=true`), and binds to localhost. Put a TLS-terminating proxy (nginx, Caddy, a cloud load balancer) in front before exposing it, and set `API_TOKEN`. Use `LOG_FORMAT=json` (the image default) so logs ship cleanly to your collector.
+
+**Configuration is validated at startup.** A missing key, an unknown provider, an out-of-range setting or a short `API_TOKEN` stops the process with one clear line instead of failing on the first run.
+
+**Shutdown and restarts.** On SIGTERM, in-flight steps are cancelled and their runs marked `interrupted`; nothing half-finished is saved. Pending approvals and questions are untouched. After a restart, an operator resumes interrupted runs from the UI.
+
+**Watch:** `agent_runs{status="failed"}` and `{status="needs_attention"}` growing, `agent_events_total{type="llm.retry"}` spiking (provider rate limits), and `{type="policy.blocked"}` (the model proposing low-confidence changes). Every run's full decision trace is in the event log and the UI.
+
+**Scaling.** Run one process per database. A run is driven by the process that started or resumed it, and SQLite is single-node. Going beyond that means Postgres plus a lease per run, so exactly one worker drives each run; the runtime's checkpoint-per-step design is what makes that change small.
+
+**Pricing.** Set `COST_IN_PER_MTOK` and `COST_OUT_PER_MTOK` to your model's current prices so the cost telemetry is accurate. Gemini's thinking tokens are counted as output, which is how they're billed.
 
 ## Limitations
 
-- The real-model path was written against the public Anthropic and OpenAI APIs but developed mostly with the offline policy. Run `make eval` with a key before relying on it.
+- **The Gemini adapter was verified against a strict mock, not the live API**, because the build environment couldn't reach Google. Run `make check-llm` and `make eval` with your key before relying on it; both use exactly the production code path.
+- **Tools act on a simulated environment.** That's deliberate for an assessment: an agent that can roll back deploys must never be pointed at real infrastructure in a take-home. The tool interfaces are the integration seam; real Kubernetes, Prometheus and Loki clients would replace `mock_env.py` without touching the runtime.
+- **Auth is a single shared token** with a self-declared operator name, enough to stop drive-by access and record who acted, not real identity. Production would use SSO and role-based approval.
 - Token counts for context budgeting are estimated at about 4 characters per token, not measured with a tokenizer.
-- It runs as a single process with SQLite. Multiple workers would need a shared store and a lease on each run, so two workers can't drive the same run.
-- There is no authentication or role-based approval. Anyone who can reach the UI can approve production changes.
+- Single process with SQLite (see "Scaling").
 - Retrieval is a lookup by service name, not semantic search, which is enough for two scenarios.
 
 ## What's next
 
-1. **Real integrations:** Kubernetes, Prometheus and Loki behind the same tool interfaces, with read-only credentials for the investigation tools and separately scoped credentials for writes.
-2. **OpenTelemetry GenAI spans** emitted alongside the event log, so traces land in Langfuse, Honeycomb or Grafana.
-3. **Evals at scale:** 20 or more scenarios, including ones with no safe fix, plus LLM-as-judge scoring of report quality and CI that blocks prompt changes that regress.
-4. **Approval policy:** roles, two-person approval for high-blast-radius changes, and approval timeouts.
-5. **Semantic recall over past incidents and runbooks,** with retrieval scored on whether it changed the agent's decision, not just whether it matched.
-6. **Prompt caching** for the system prompt and tool schemas, plus exact token counting.
+1. **Real integrations:** Kubernetes, Prometheus and Loki behind the same tool interfaces, with read-only credentials for investigation and separately scoped credentials for writes.
+2. **Identity:** SSO, roles, two-person approval for high-blast-radius changes, and approval timeouts.
+3. **OpenTelemetry GenAI spans** alongside the event log, so traces land in Langfuse, Honeycomb or Grafana.
+4. **Evals at scale:** 20 or more scenarios, including ones with no safe fix, plus LLM-as-judge scoring of report quality, with CI blocking prompt changes that regress.
+5. **Horizontal scale:** Postgres and per-run leases.
+6. **Semantic recall** over past incidents and runbooks, and prompt caching for the system prompt and tool schemas.
 
 ## How this was built
 

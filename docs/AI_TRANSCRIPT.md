@@ -13,6 +13,8 @@ surfaced and their fixes:
 - task-launching endpoints ran in FastAPI's threadpool, where there is no event loop
 - visual review in headless Chromium found mobile layout, dark-mode contrast and
   stale run-list status issues
+- mutation-checking the Gemini tests showed the mock accepted responses that
+  dropped Gemini's call ids; the mock was tightened until both breakages failed
 
 ---
 
