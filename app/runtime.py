@@ -49,6 +49,10 @@ class InvalidInput(Exception):
     pass
 
 
+class TooBusy(Exception):
+    pass
+
+
 def _fmt(out) -> str:
     return out if isinstance(out, str) else json.dumps(out, indent=1, ensure_ascii=False)
 
@@ -115,6 +119,17 @@ class Runtime:
             view["history"] = st["history"]
         return view
 
+    async def shutdown(self) -> None:
+        """Graceful stop: cancel in-flight steps and mark those runs interrupted."""
+        running = {rid: t for rid, t in self._tasks.items() if not t.done()}
+        for t in running.values():
+            t.cancel()
+        await asyncio.gather(*running.values(), return_exceptions=True)
+        for rid in running:
+            st = self.store.load(rid)
+            if st and st["status"] == "running":
+                self._set_status(st, "interrupted", "The server shut down during this step. Resume to continue from the last checkpoint.")
+
     # ---- lifecycle -------------------------------------------------------------------------
     def recover(self) -> int:
         """On startup, mark runs that were mid-flight when the process died."""
@@ -128,6 +143,9 @@ class Runtime:
             scenario = load_scenario(scenario_id)
         except KeyError as e:
             raise NotFound(str(e).strip("'\"")) from None
+        active = sum(1 for t in self._tasks.values() if not t.done())
+        if active >= self.settings.max_concurrent_runs:
+            raise TooBusy(f"{active} runs are already active (limit {self.settings.max_concurrent_runs}). Try again shortly.")
         st = _new_state(f"run-{uuid.uuid4().hex[:8]}", scenario, self.settings)
         st["recalled_memories"] = self.store.recall([st["service"]], self.settings.memory_ttl_days, 3)
         self.store.create_run(st)
@@ -311,8 +329,11 @@ class Runtime:
                                     "latency_ms": ms, "cost_usd": round(cost, 6), "context": stats, "tool_calls": len(resp.tool_calls)})
 
         calls = resp.tool_calls
-        st["history"].append({"role": "assistant", "text": resp.text, "step": step,
-                              "tool_calls": [{"id": c.id, "name": c.name, "args": c.args} for c in calls]})
+        assistant = {"role": "assistant", "text": resp.text, "step": step,
+                     "tool_calls": [{"id": c.id, "name": c.name, "args": c.args} for c in calls]}
+        if resp.raw:  # e.g. Gemini thought signatures: checkpointed so they survive a restart
+            assistant["raw"] = resp.raw
+        st["history"].append(assistant)
         if resp.text:
             self._emit(st, "agent.message", {"text": resp.text})
         if not calls:

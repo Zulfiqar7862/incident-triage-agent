@@ -149,3 +149,13 @@ class Store:
             {**json.loads(r["content"]), "age_days": round((now - r["created_at"]) / 86400, 1)}
             for r in rows
         ]
+
+    # ---- operations ------------------------------------------------------------
+    def ping(self) -> bool:
+        return self._rows("SELECT 1")[0][0] == 1
+
+    def status_counts(self) -> dict[str, int]:
+        return {r["status"]: r["n"] for r in self._rows("SELECT status, COUNT(*) AS n FROM runs GROUP BY status")}
+
+    def event_counts(self) -> dict[str, int]:
+        return {r["type"]: r["n"] for r in self._rows("SELECT type, COUNT(*) AS n FROM events GROUP BY type")}

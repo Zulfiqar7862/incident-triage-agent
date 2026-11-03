@@ -166,6 +166,8 @@ dialog::backdrop { background: rgba(10, 14, 20, .5); }
   <span class="brand">Incident triage agent</span>
   <span id="mode" class="mode"></span>
   <span class="spacer"></span>
+  <label class="small" for="operator">Signed in as</label>
+  <input id="operator" placeholder="Your name" aria-label="Your name for the audit log" style="width:140px">
   <select id="scenario" aria-label="Incident scenario"></select>
   <button id="startBtn" class="btn-primary">Start triage</button>
 </header>
@@ -194,8 +196,18 @@ const RESUMABLE = ['paused', 'interrupted', 'failed', 'needs_attention'];
 
 let runId = null, es = null, pendingKey = null, refreshTimer = null, cards = {};
 
-async function api(path, opts = {}) {
-  const r = await fetch(path, { headers: { 'content-type': 'application/json' }, ...opts });
+// Auth: the API token lives only in this tab (sessionStorage); the operator name is remembered.
+const store = { get: (s, k) => { try { return s.getItem(k) || ''; } catch { return ''; } },
+                set: (s, k, v) => { try { s.setItem(k, v); } catch {} } };
+const token = () => store.get(sessionStorage, 'apiToken');
+async function api(path, opts = {}, retried = false) {
+  const headers = { 'content-type': 'application/json', 'x-operator': $('#operator').value.trim() };
+  if (token()) headers.authorization = `Bearer ${token()}`;
+  const r = await fetch(path, { ...opts, headers });
+  if (r.status === 401 && !retried) {
+    const t = prompt('This server requires an API token. Paste it to continue:');
+    if (t) { store.set(sessionStorage, 'apiToken', t.trim()); return api(path, opts, true); }
+  }
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(typeof j.detail === 'string' ? j.detail : `${r.status} ${r.statusText}`);
   return j;
@@ -203,6 +215,8 @@ async function api(path, opts = {}) {
 const post = (p, body) => api(p, { method: 'POST', body: JSON.stringify(body || {}) });
 
 async function init() {
+  $('#operator').value = store.get(localStorage, 'operator');
+  $('#operator').onchange = () => store.set(localStorage, 'operator', $('#operator').value.trim());
   const h = await api('/api/health');
   const mode = $('#mode');
   if (h.llm.provider === 'scripted') {
@@ -241,7 +255,8 @@ function select(id) {
   document.querySelectorAll('#runList li').forEach(li => li.classList.toggle('sel', li.dataset.id === id));
   $('#trace').innerHTML = ''; $('#side').innerHTML = ''; delete $('#side').dataset.run;
   if (es) es.close();
-  es = new EventSource(`/api/runs/${encodeURIComponent(id)}/stream`);
+  // EventSource cannot send headers, so the stream takes the token as a query parameter.
+  es = new EventSource(`/api/runs/${encodeURIComponent(id)}/stream` + (token() ? `?token=${encodeURIComponent(token())}` : ''));
   es.onmessage = e => { const ev = JSON.parse(e.data); if (ev.run_id === runId) { render(ev); scheduleRefresh(); } };
   refresh();
 }
@@ -322,9 +337,9 @@ function render(ev) {
       add(stepLabel(p), `<div class="gate"><b>Waiting for your approval</b><br><code>${esc(p.tool)}(${esc(argStr(withoutKeys(p.args, ['reason', 'confidence'])))})</code></div>`);
       break;
     }
-    case 'approval.decided': note(p, `You <b>${esc(p.decision)}</b> ${esc(p.tool)}${p.edited ? ' with edited arguments' : ''}${p.feedback ? `: “${esc(p.feedback)}”` : ''}`); break;
+    case 'approval.decided': note(p, `<b>${esc(p.actor || 'Operator')}</b> ${esc(p.decision)} ${esc(p.tool)}${p.edited ? ' with edited arguments' : ''}${p.feedback ? `: “${esc(p.feedback)}”` : ''}`); break;
     case 'input.requested': add(stepLabel(p), `<div class="gate"><b>The agent asks:</b> ${esc(p.question)}</div>`); break;
-    case 'operator.message': note(p, `You said: “${esc(p.text)}”${p.queued ? ' (the agent reads it at its next step)' : ''}`); break;
+    case 'operator.message': note(p, `${esc(p.actor || 'Operator')} said: “${esc(p.text)}”${p.queued ? ' (the agent reads it at its next step)' : ''}`); break;
     case 'run.finished': {
       const r = p.result;
       add(stepLabel(p), `<div class="outcome ${r.resolved ? '' : 'bad'}"><b>${r.resolved ? 'Resolved' : 'Not resolved'}.</b> ${esc(r.summary)}</div>`);
@@ -423,6 +438,7 @@ async function act(fn) {
   catch (e) { alert(e.message); }
 }
 async function approve() {
+  if (!$('#operator').value.trim()) { $('#operator').focus(); return alert('Enter your name first: approvals are recorded in the audit log.'); }
   let args;
   try { args = JSON.parse($('#apArgs').value); } catch { return alert('The arguments must be valid JSON.'); }
   await act(() => post(`/api/runs/${runId}/approve`, { args }));

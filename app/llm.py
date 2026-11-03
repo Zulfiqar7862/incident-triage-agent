@@ -2,20 +2,24 @@
 
 The runtime keeps history in one neutral format:
   {"role": "user", "content": str}
-  {"role": "assistant", "text": str, "tool_calls": [{"id", "name", "args"}]}
+  {"role": "assistant", "text": str, "tool_calls": [{"id", "name", "args"}], "raw": {...}?}
   {"role": "tool", "tool_call_id": str, "name": str, "content": str, "is_error": bool}
-and each adapter converts it to its provider's wire format. Plain httpx keeps the
-dependency surface small and the requests easy to read.
+and each adapter converts it to its provider's wire format. "raw" holds provider
+data that must be sent back verbatim (Gemini thought signatures).
+
+Plain httpx keeps the dependency surface small and every request easy to read.
+Every adapter accepts an httpx transport so tests can run against a mocked API.
 """
 from __future__ import annotations
 
 import json
 import os
+import uuid
 from dataclasses import dataclass, field
 
 import httpx
 
-from .config import Settings
+from .config import ConfigError, Settings
 
 
 @dataclass
@@ -32,6 +36,7 @@ class LLMResponse:
     input_tokens: int = 0
     output_tokens: int = 0
     model: str = ""
+    raw: dict | None = None  # provider data to replay on the next request
 
 
 class LLMTransientError(Exception):
@@ -39,7 +44,14 @@ class LLMTransientError(Exception):
 
 
 class LLMError(Exception):
-    """Non-retryable (bad request, auth)."""
+    """Non-retryable (bad request, auth, safety block)."""
+
+
+RETRYABLE_STATUS = (408, 409, 429, 500, 502, 503, 504, 529)
+
+
+def _client(timeout: float, transport: httpx.AsyncBaseTransport | None) -> httpx.AsyncClient:
+    return httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=10.0), transport=transport)
 
 
 async def _post(client: httpx.AsyncClient, url: str, headers: dict, payload: dict) -> dict:
@@ -47,14 +59,116 @@ async def _post(client: httpx.AsyncClient, url: str, headers: dict, payload: dic
         r = await client.post(url, headers=headers, json=payload)
     except httpx.TransportError as e:  # includes timeouts
         raise LLMTransientError(f"network error: {e!r}") from e
-    if r.status_code in (408, 409, 429, 500, 502, 503, 504, 529):
+    if r.status_code in RETRYABLE_STATUS:
         raise LLMTransientError(f"HTTP {r.status_code}: {r.text[:300]}")
     if r.status_code >= 400:
-        raise LLMError(f"HTTP {r.status_code}: {r.text[:500]}")
-    return r.json()
+        raise LLMError(f"HTTP {r.status_code}: {r.text[:800]}")
+    try:
+        return r.json()
+    except ValueError as e:
+        raise LLMTransientError(f"invalid JSON from provider: {r.text[:200]}") from e
 
 
-# ---- Anthropic ------------------------------------------------------------------------
+# ---- Gemini (Google AI / Generative Language API) ------------------------------------------
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+# Documented placeholder for function calls Gemini did not generate itself (e.g. history
+# written by another provider). Real signatures from Gemini are always replayed verbatim.
+GEMINI_DUMMY_SIGNATURE = "skip_thought_signature_validator"
+GEMINI_BLOCKED = {"SAFETY", "RECITATION", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "IMAGE_SAFETY"}
+
+
+def to_gemini(messages: list[dict]) -> list[dict]:
+    contents: list[dict] = []
+    gemini_ids: set[str] = set()  # call ids Gemini itself issued (echoed back in functionResponse)
+
+    def push(role: str, parts: list[dict]) -> None:
+        if contents and contents[-1]["role"] == role:
+            contents[-1]["parts"].extend(parts)
+        else:
+            contents.append({"role": role, "parts": list(parts)})
+
+    for m in messages:
+        if m["role"] == "user":
+            push("user", [{"text": m["content"]}])
+        elif m["role"] == "assistant":
+            raw = m.get("raw") or {}
+            if raw.get("provider") == "gemini" and raw.get("parts"):
+                parts = raw["parts"]  # verbatim, including thoughtSignature fields
+                gemini_ids |= {p["functionCall"]["id"] for p in parts if p.get("functionCall", {}).get("id")}
+            else:
+                parts = [{"text": m["text"]}] if m.get("text") else []
+                for i, c in enumerate(m.get("tool_calls", [])):
+                    part = {"functionCall": {"name": c["name"], "args": c["args"]}}
+                    if i == 0:
+                        part["thoughtSignature"] = GEMINI_DUMMY_SIGNATURE
+                    parts.append(part)
+                parts = parts or [{"text": "(no output)"}]
+            push("model", parts)
+        elif m["role"] == "tool":
+            response = {"error": m["content"]} if m.get("is_error") else {"result": m["content"]}
+            fr = {"name": m["name"], "response": response}
+            if m["tool_call_id"] in gemini_ids:
+                fr["id"] = m["tool_call_id"]
+            push("user", [{"functionResponse": fr}])
+    # Function responses go before any text in the same user turn.
+    for c in contents:
+        if c["role"] == "user":
+            c["parts"].sort(key=lambda p: 0 if "functionResponse" in p else 1)
+    return contents
+
+
+def from_gemini(data: dict, model: str) -> LLMResponse:
+    candidates = data.get("candidates") or []
+    if not candidates:
+        reason = (data.get("promptFeedback") or {}).get("blockReason", "unknown")
+        raise LLMError(f"Gemini returned no candidates (prompt blocked: {reason})")
+    cand = candidates[0]
+    parts = (cand.get("content") or {}).get("parts") or []
+    finish = cand.get("finishReason", "")
+    text = "\n".join(p["text"] for p in parts if "text" in p and not p.get("thought")).strip()
+    calls = []
+    for p in parts:
+        fc = p.get("functionCall")
+        if fc:
+            calls.append(ToolCall(fc.get("id") or f"gemcall_{uuid.uuid4().hex[:12]}", fc["name"], fc.get("args") or {}))
+    if finish in GEMINI_BLOCKED and not calls and not text:
+        raise LLMError(f"Gemini stopped the response (finishReason={finish})")
+    if finish == "MALFORMED_FUNCTION_CALL" and not calls:
+        # The runtime nudges the model to try again when a turn has no tool calls.
+        text = (text + "\n" if text else "") + "(The previous function call was malformed; please retry it with valid JSON arguments.)"
+    usage = data.get("usageMetadata") or {}
+    out_tokens = usage.get("candidatesTokenCount", 0) + usage.get("thoughtsTokenCount", 0)
+    raw = {"provider": "gemini", "parts": [p for p in parts if not p.get("thought")]} if parts else None
+    return LLMResponse(text, calls, usage.get("promptTokenCount", 0), out_tokens,
+                       data.get("modelVersion", model), raw)
+
+
+class GeminiLLM:
+    provider = "gemini"
+
+    def __init__(self, model: str, api_key: str, timeout: float, max_output_tokens: int = 8192,
+                 transport: httpx.AsyncBaseTransport | None = None):
+        self.model = model
+        self.max_output_tokens = max_output_tokens
+        self._headers = {"x-goog-api-key": api_key, "content-type": "application/json"}
+        self._client = _client(timeout, transport)
+
+    async def complete(self, system: str, messages: list[dict], tools: list[dict], state: dict | None = None) -> LLMResponse:
+        payload = {
+            "systemInstruction": {"parts": [{"text": system}]},
+            "contents": to_gemini(messages),
+            "tools": [{"functionDeclarations": [
+                {"name": t["name"], "description": t["description"], "parametersJsonSchema": t["input_schema"]}
+                for t in tools
+            ]}],
+            "toolConfig": {"functionCallingConfig": {"mode": "AUTO"}},
+            "generationConfig": {"maxOutputTokens": self.max_output_tokens},
+        }
+        data = await _post(self._client, GEMINI_URL.format(model=self.model), self._headers, payload)
+        return from_gemini(data, self.model)
+
+
+# ---- Anthropic ---------------------------------------------------------------------------------
 def to_anthropic(messages: list[dict]) -> list[dict]:
     out: list[dict] = []
 
@@ -73,8 +187,7 @@ def to_anthropic(messages: list[dict]) -> list[dict]:
             push("assistant", blocks or [{"type": "text", "text": "(no output)"}])
         elif m["role"] == "tool":
             push("user", [{"type": "tool_result", "tool_use_id": m["tool_call_id"], "content": m["content"], "is_error": bool(m.get("is_error"))}])
-    # The API wants tool_result blocks before any text in a user turn.
-    for msg in out:
+    for msg in out:  # tool_result blocks must come before text in a user turn
         if msg["role"] == "user":
             msg["content"].sort(key=lambda b: 0 if b["type"] == "tool_result" else 1)
     return out
@@ -83,15 +196,17 @@ def to_anthropic(messages: list[dict]) -> list[dict]:
 class AnthropicLLM:
     provider = "anthropic"
 
-    def __init__(self, model: str, api_key: str, timeout: float):
+    def __init__(self, model: str, api_key: str, timeout: float, max_output_tokens: int = 8192,
+                 transport: httpx.AsyncBaseTransport | None = None):
         self.model = model
+        self.max_output_tokens = max_output_tokens
         self._headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
-        self._client = httpx.AsyncClient(timeout=timeout)
+        self._client = _client(timeout, transport)
 
     async def complete(self, system: str, messages: list[dict], tools: list[dict], state: dict | None = None) -> LLMResponse:
         payload = {
             "model": self.model,
-            "max_tokens": 2048,
+            "max_tokens": self.max_output_tokens,
             "system": system,
             "messages": to_anthropic(messages),
             "tools": [{"name": t["name"], "description": t["description"], "input_schema": t["input_schema"]} for t in tools],
@@ -104,7 +219,7 @@ class AnthropicLLM:
         return LLMResponse(text, calls, usage.get("input_tokens", 0), usage.get("output_tokens", 0), data.get("model", self.model))
 
 
-# ---- OpenAI -----------------------------------------------------------------------------
+# ---- OpenAI ------------------------------------------------------------------------------------
 def to_openai(messages: list[dict]) -> list[dict]:
     out = []
     for m in messages:
@@ -126,10 +241,11 @@ def to_openai(messages: list[dict]) -> list[dict]:
 class OpenAILLM:
     provider = "openai"
 
-    def __init__(self, model: str, api_key: str, timeout: float):
+    def __init__(self, model: str, api_key: str, timeout: float, max_output_tokens: int = 8192,
+                 transport: httpx.AsyncBaseTransport | None = None):
         self.model = model
         self._headers = {"Authorization": f"Bearer {api_key}", "content-type": "application/json"}
-        self._client = httpx.AsyncClient(timeout=timeout)
+        self._client = _client(timeout, transport)
 
     async def complete(self, system: str, messages: list[dict], tools: list[dict], state: dict | None = None) -> LLMResponse:
         payload = {
@@ -148,17 +264,46 @@ class OpenAILLM:
                 args = {"_unparseable_arguments": raw}  # validation fails; the agent sees the error and retries
             calls.append(ToolCall(tc["id"], tc["function"]["name"], args))
         usage = data.get("usage", {})
-        return LLMResponse((msg.get("content") or "").strip(), calls, usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0), data.get("model", self.model))
+        return LLMResponse((msg.get("content") or "").strip(), calls, usage.get("prompt_tokens", 0),
+                           usage.get("completion_tokens", 0), data.get("model", self.model))
 
 
-def make_llm(settings: Settings):
+# ---- factory -----------------------------------------------------------------------------------
+def _gemini_key() -> str:
+    return os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
+
+
+def resolve_provider(settings: Settings) -> str:
     provider = settings.llm_provider
     if provider == "auto":
-        provider = "anthropic" if os.getenv("ANTHROPIC_API_KEY") else "openai" if os.getenv("OPENAI_API_KEY") else "scripted"
+        if _gemini_key():
+            provider = "gemini"
+        elif os.getenv("ANTHROPIC_API_KEY"):
+            provider = "anthropic"
+        elif os.getenv("OPENAI_API_KEY"):
+            provider = "openai"
+        else:
+            provider = "scripted"
+    if provider == "scripted" and settings.require_llm:
+        raise ConfigError("REQUIRE_LLM is true but no model is configured. Set GEMINI_API_KEY (or another provider's key).")
+    return provider
+
+
+def make_llm(settings: Settings, transport: httpx.AsyncBaseTransport | None = None):
+    provider = resolve_provider(settings)
+    if provider == "gemini":
+        key = _gemini_key()
+        if not key:
+            raise ConfigError("LLM_PROVIDER=gemini but GEMINI_API_KEY is not set")
+        return GeminiLLM(settings.gemini_model, key, settings.llm_timeout_s, settings.llm_max_output_tokens, transport)
     if provider == "anthropic":
-        return AnthropicLLM(settings.anthropic_model, os.environ["ANTHROPIC_API_KEY"], settings.llm_timeout_s)
+        if not os.getenv("ANTHROPIC_API_KEY"):
+            raise ConfigError("LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY is not set")
+        return AnthropicLLM(settings.anthropic_model, os.environ["ANTHROPIC_API_KEY"], settings.llm_timeout_s, settings.llm_max_output_tokens, transport)
     if provider == "openai":
-        return OpenAILLM(settings.openai_model, os.environ["OPENAI_API_KEY"], settings.llm_timeout_s)
+        if not os.getenv("OPENAI_API_KEY"):
+            raise ConfigError("LLM_PROVIDER=openai but OPENAI_API_KEY is not set")
+        return OpenAILLM(settings.openai_model, os.environ["OPENAI_API_KEY"], settings.llm_timeout_s, settings.llm_max_output_tokens, transport)
     from .scripted import ScriptedPolicy
 
     return ScriptedPolicy(delay_s=settings.scripted_delay_s)

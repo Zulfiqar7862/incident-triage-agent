@@ -1,11 +1,15 @@
 """Runtime settings. Every field can be overridden by an environment variable
 of the same name in upper case (e.g. MAX_STEPS=40). A local .env file is read
-on startup if present."""
+on startup if present; real environment variables always win."""
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass, fields
 from pathlib import Path
+
+
+class ConfigError(Exception):
+    """Invalid configuration. Raised at startup so a bad deploy fails fast."""
 
 
 def load_dotenv(path: str = ".env") -> None:
@@ -17,25 +21,42 @@ def load_dotenv(path: str = ".env") -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
-        value = value.strip().strip('"').strip("'")
+        value = value.split(" #", 1)[0].strip().strip('"').strip("'")
         if value:
             os.environ.setdefault(key.strip(), value)
+
+
+def _parse(raw: str, default):
+    if isinstance(default, bool):
+        if raw.strip().lower() in ("1", "true", "yes", "on"):
+            return True
+        if raw.strip().lower() in ("0", "false", "no", "off"):
+            return False
+        raise ConfigError(f"expected true/false, got {raw!r}")
+    return type(default)(raw)
 
 
 @dataclass
 class Settings:
     db_path: str = "data/agent.db"
-    llm_provider: str = "auto"  # auto | anthropic | openai | scripted
+
+    # Model provider: auto | gemini | anthropic | openai | scripted
+    llm_provider: str = "auto"
+    gemini_model: str = "gemini-3.5-flash"
     anthropic_model: str = "claude-sonnet-5-5"
     openai_model: str = "gpt-4.1"
-    llm_timeout_s: float = 90.0
+    llm_timeout_s: float = 120.0
     llm_max_attempts: int = 4
     llm_backoff_s: float = 1.0
+    llm_max_output_tokens: int = 8192
+    # Refuse to start without a real model (no silent fallback to the offline policy).
+    require_llm: bool = False
 
     # Run guardrails
     max_steps: int = 25
     max_run_tokens: int = 400_000
     min_write_confidence: float = 0.5
+    max_concurrent_runs: int = 10
 
     # Context engineering
     context_budget_tokens: int = 24_000
@@ -50,9 +71,14 @@ class Settings:
     # Long-term memory
     memory_ttl_days: int = 30
 
-    # Cost estimate (USD per million tokens)
-    cost_in_per_mtok: float = 3.0
-    cost_out_per_mtok: float = 15.0
+    # Cost estimate (USD per million tokens). Set to your model's current prices.
+    cost_in_per_mtok: float = 0.5
+    cost_out_per_mtok: float = 3.0
+
+    # Security and operations
+    api_token: str = ""          # when set, every /api request needs "Authorization: Bearer <token>"
+    log_format: str = "text"     # text | json
+    log_level: str = "INFO"
 
     # Offline scripted policy: delay per "LLM" call so the UI is watchable
     scripted_delay_s: float = 0.8
@@ -64,5 +90,27 @@ class Settings:
         for f in fields(cls):
             raw = os.getenv(f.name.upper())
             if raw is not None and raw != "":
-                overrides[f.name] = type(f.default)(raw)
-        return cls(**overrides)
+                try:
+                    overrides[f.name] = _parse(raw, f.default)
+                except (ValueError, ConfigError) as e:
+                    raise ConfigError(f"{f.name.upper()}: {e}") from None
+        settings = cls(**overrides)
+        settings.validate()
+        return settings
+
+    def validate(self) -> None:
+        problems = []
+        if self.llm_provider not in ("auto", "gemini", "anthropic", "openai", "scripted"):
+            problems.append(f"LLM_PROVIDER must be auto, gemini, anthropic, openai or scripted (got {self.llm_provider!r})")
+        if self.log_format not in ("text", "json"):
+            problems.append("LOG_FORMAT must be text or json")
+        for name in ("max_steps", "max_run_tokens", "context_budget_tokens", "tool_output_max_chars",
+                     "max_concurrent_runs", "tool_max_attempts", "llm_max_attempts"):
+            if getattr(self, name) <= 0:
+                problems.append(f"{name.upper()} must be positive")
+        if not 0 <= self.min_write_confidence <= 1:
+            problems.append("MIN_WRITE_CONFIDENCE must be between 0 and 1")
+        if self.api_token and len(self.api_token) < 16:
+            problems.append("API_TOKEN must be at least 16 characters")
+        if problems:
+            raise ConfigError("; ".join(problems))
