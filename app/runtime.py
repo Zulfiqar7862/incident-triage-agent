@@ -1,27 +1,32 @@
-"""Agent runtime: run lifecycle, the reason -> act -> observe loop, durable
-checkpoints, tool execution with retry/backoff, human gates, and the event log.
+"""Agent runtime: LangGraph StateGraph loop, durable checkpoints, HITL gates.
 
 Lifecycle
     queued -> running -> (awaiting_approval | awaiting_input | paused | needs_attention)
            -> running -> completed | failed | cancelled
     A server restart turns "running" into "interrupted"; resume continues from the
-    last checkpoint. A failed run can also be resumed from its last checkpoint.
+    last LangGraph checkpoint (and the Store UI checkpoint).
 
-Durability
-    State is checkpointed to SQLite after every step and on every status change.
-    A step that crashes midway is simply replayed from the previous checkpoint.
-    Production changes are idempotent by tool-call id, so a replayed approval
-    never applies the same change twice.
+Orchestration
+    The reason -> act -> observe loop is a real LangGraph StateGraph with
+    interrupt() / Command(resume=...) for human gates and an AsyncSqliteSaver
+    (or Postgres) checkpointer keyed by thread_id=run_id. The Store remains the
+    source of truth for the UI/SSE event log.
 """
 from __future__ import annotations
 
 import asyncio
-import threading
 import json
 import logging
+import threading
 import time
 import uuid
 
+from langgraph.types import Command
+from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
+
+from .agent.graph import build_agent_graph
+from .agent.checkpointer import open_checkpointer
+from .agent.state import make_run_id, new_run_state
 from .config import Settings
 from .context import SYSTEM_PROMPT, brief_args, build_context, one_line, truncate_output
 from .guards import LoopGuard, find_injection_markers
@@ -107,6 +112,8 @@ class Runtime:
         self._control: dict[str, str] = {}
         self._gate_locks: dict[str, threading.Lock] = {}
         self._gate_locks_mu = threading.Lock()
+        self._pending_resume: dict[str, dict] = {}
+        self._relaunch: set[str] = set()
 
     # ---- queries -------------------------------------------------------------------------
     def get(self, run_id: str) -> dict:
@@ -117,7 +124,13 @@ class Runtime:
 
     def is_active(self, run_id: str) -> bool:
         t = self._tasks.get(run_id)
-        return bool(t and not t.done())
+        if not (t and not t.done()):
+            return False
+        st = self.store.load(run_id)
+        # Task may still be unwinding after parking on a gate / pause / budget stop.
+        if st and st["status"] not in ("running", "queued"):
+            return False
+        return True
 
 
     def _gate_lock(self, run_id: str) -> threading.Lock:
@@ -175,7 +188,7 @@ class Runtime:
         active = sum(1 for t in self._tasks.values() if not t.done())
         if active >= self.settings.max_concurrent_runs:
             raise TooBusy(f"{active} runs are already active (limit {self.settings.max_concurrent_runs}). Try again shortly.")
-        st = _new_state(f"run-{uuid.uuid4().hex[:8]}", scenario, self.settings)
+        st = new_run_state(make_run_id(), scenario, self.settings)
         st["recalled_memories"] = self.store.recall([st["service"]], self.settings.memory_ttl_days, 3)
         self.store.create_run(st)
         self._emit(st, "run.created", {"task": st["task"], "scenario": scenario_id,
@@ -233,56 +246,36 @@ class Runtime:
 
     # ---- human-in-the-loop -------------------------------------------------------------------
     def approve(self, run_id: str, edited_args: dict | None = None, actor: str = "operator") -> None:
+        """Resume the LangGraph approval interrupt with an approve decision.
+
+        Argument validation happens here so the HTTP API can 422 before the
+        graph runs. The gate node performs the idempotent production apply.
+        """
         with self._gate_lock(run_id):
             st = self.get(run_id)
             p = st.get("pending")
-            # Interrupted approval may still be "interrupted"/"paused"/etc. with pending.executing set.
             can_finish = (
                 (st["status"] == "awaiting_approval" and p and p.get("kind") == "approval")
                 or (p and p.get("kind") == "approval" and p.get("executing"))
             )
-            if not can_finish:
+            if not can_finish or (p and p.get("submitted")):
+                raise RunStateError(f"Run is {st['status']}; nothing is waiting for approval")
+            if run_id in self._pending_resume:
                 raise RunStateError(f"Run is {st['status']}; nothing is waiting for approval")
             spec = TOOLS[p["tool"]]
-            # Crash recovery: tool result already in history — do not record again.
-            if p.get("executing") and self._tool_result_recorded(st, p["tool_call_id"]):
-                st["pending"] = None
-                self.store.save(st)
-                self._launch(run_id)
-                return
             base_args = p.get("final_args") or p["args"]
             try:
-                args = spec.parse({**base_args, **(edited_args or {})})
+                spec.parse({**base_args, **(edited_args or {})})
             except ToolArgsError as e:
                 raise InvalidInput(f"Edited arguments are invalid: {e}") from None
-            final = args.model_dump()
-            edited = final != p["args"]
-
-            # Checkpoint the intent before touching production. If we crash after this,
-            # re-approving / resume replays idempotently (same action id) and records at most once.
-            p["executing"], p["final_args"] = True, final
+            # Claim the gate immediately so a double-click 409s before the graph resumes.
+            p["submitted"] = True
             self.store.save(st)
-            try:
-                content, is_error = _fmt(spec.handler(self._cluster(st), args, p["tool_call_id"])), False
-            except ToolError as e:
-                content, is_error = f"Execution failed: {e}", True
-
-            if self._tool_result_recorded(st, p["tool_call_id"]):
-                st["pending"] = None
-                self.store.save(st)
-                self._launch(run_id)
-                return
-
-            header = "Operator APPROVED this action" + (f" after editing the arguments to {json.dumps(final)}" if edited else "") + "."
-            if actor == "system-resume":
-                header = "Resumed an interrupted approval; replaying the idempotent production change."
-            st["operator_log"].append({"step": p["step"], "decision": "approved", "tool": p["tool"], "args": final,
-                                       "edited": edited, "actor": actor, "at": time.time()})
-            self._emit(st, "approval.decided", {"id": p["tool_call_id"], "decision": "approved", "tool": p["tool"],
-                                                "args": final, "edited": edited, "actor": actor})
-            self._record(st, p["step"], ToolCall(p["tool_call_id"], p["tool"], final), f"{header}\nResult: {content}", is_error, {})
-            st["pending"] = None
-            self.store.save(st)
+            self._pending_resume[run_id] = {
+                "decision": "approved",
+                "args": edited_args,
+                "actor": actor,
+            }
             self._launch(run_id)
 
     def reject(self, run_id: str, feedback: str = "", actor: str = "operator") -> None:
@@ -291,17 +284,17 @@ class Runtime:
             p = st.get("pending")
             if st["status"] != "awaiting_approval" or not p or p["kind"] != "approval":
                 raise RunStateError(f"Run is {st['status']}; nothing is waiting for approval")
-            if p.get("executing"):
+            if p.get("executing") or p.get("submitted"):
                 raise RunStateError("This approval is already executing and cannot be rejected; resume to finish it.")
-            feedback = feedback.strip()
-            st["operator_log"].append({"step": p["step"], "decision": "rejected", "tool": p["tool"], "feedback": feedback,
-                                       "actor": actor, "at": time.time()})
-            self._emit(st, "approval.decided", {"id": p["tool_call_id"], "decision": "rejected", "tool": p["tool"],
-                                                "feedback": feedback, "actor": actor})
-            self._record(st, p["step"], ToolCall(p["tool_call_id"], p["tool"], p["args"]),
-                         f"Operator REJECTED this action; it was NOT executed. Feedback: {feedback or '(none given)'}", False, {})
-            st["pending"] = None
+            if run_id in self._pending_resume:
+                raise RunStateError(f"Run is {st['status']}; nothing is waiting for approval")
+            p["submitted"] = True
             self.store.save(st)
+            self._pending_resume[run_id] = {
+                "decision": "rejected",
+                "feedback": (feedback or "").strip(),
+                "actor": actor,
+            }
             self._launch(run_id)
 
     def message(self, run_id: str, text: str, actor: str = "operator") -> None:
@@ -313,211 +306,148 @@ class Runtime:
             raise RunStateError(f"Run is {st['status']}")
         p = st.get("pending")
         if st["status"] == "awaiting_input" and p and p["kind"] == "input":
-            st["operator_log"].append({"step": p["step"], "decision": "message", "text": text, "at": time.time()})
-            self._emit(st, "operator.message", {"text": text, "answering": p["question"], "actor": actor})
-            self._record(st, p["step"], ToolCall(p["tool_call_id"], "ask_operator", p["args"]), f"Operator answered: {text}", False, {})
-            st["pending"] = None
-            self.store.save(st)
+            self._pending_resume[run_id] = {"decision": "message", "text": text, "actor": actor}
             self._launch(run_id)
             return
         self.store.push_inbox(run_id, text)
         self._emit(st, "operator.message", {"text": text, "queued": True, "actor": actor})
 
     # ---- the loop --------------------------------------------------------------------------------
+
+    def _publish_gate_if_needed(self, run_id: str) -> None:
+        """Flip Store status to awaiting_* only after the interrupt is checkpointed."""
+        from .context import brief_args
+
+        st = self.get(run_id)
+        p = st.get("pending")
+        if not p or st["status"] in ("awaiting_approval", "awaiting_input"):
+            return
+        if p.get("kind") == "approval":
+            self._emit(st, "approval.requested", p)
+            self._set_status(
+                st,
+                "awaiting_approval",
+                f"Approve, edit, or reject {p['tool']}({brief_args(p['args'])}).",
+            )
+        elif p.get("kind") == "input":
+            self._emit(st, "input.requested", p)
+            self._set_status(st, "awaiting_input", "The agent asked the operator a question.")
+
     def _launch(self, run_id: str) -> None:
-        if not self.is_active(run_id):
-            self._tasks[run_id] = asyncio.get_running_loop().create_task(self._drive(run_id))
+        t = self._tasks.get(run_id)
+        if t is not None and not t.done():
+            # Current drive is still unwinding (e.g. just parked on needs_attention).
+            # Relaunch from finally so we never run two checkpointers on one thread.
+            self._relaunch.add(run_id)
+            return
+        self._tasks[run_id] = asyncio.get_running_loop().create_task(self._drive(run_id))
 
     async def _drive(self, run_id: str) -> None:
-        st = self.get(run_id)
-        self._set_status(st, "running")
+        """Run the LangGraph until END or an interrupt (human gate).
+
+        Approve/reject may race with the interrupt return: they stash a payload in
+        `_pending_resume` and call `_launch`. We drain that payload here, and if a
+        payload arrives in the finally window we re-schedule ourselves.
+        """
         try:
-            while True:
-                ctl = self._control.pop(run_id, None)
-                if ctl == "cancel":
-                    self._set_status(st, "cancelled", "Cancelled by operator")
-                    return
-                if ctl == "pause":
-                    self._set_status(st, "paused", "Paused by operator at a step boundary")
-                    return
-                if st["step"] >= st["max_steps"]:
-                    self._set_status(st, "needs_attention", f"Step budget of {st['max_steps']} used up without finishing. Review the trace, send guidance, and resume to grant 10 more steps.")
-                    return
-                if st["usage"]["input_tokens"] + st["usage"]["output_tokens"] >= st["max_run_tokens"]:
-                    self._set_status(st, "needs_attention", "Token budget for this run is used up. Resume to grant 50% more.")
-                    return
-                if self.settings.max_run_cost_usd > 0 and st["usage"]["cost_usd"] >= self.settings.max_run_cost_usd:
-                    self._set_status(st, "needs_attention",
-                                     f"Cost budget of ${self.settings.max_run_cost_usd:.2f} for this run is used up. Resume to raise it 50%.")
-                    return
-                self._maybe_budget_alert(st)
-                acks, outcome = await self._step(st)
-                self.store.save(st)
-                self.store.ack_inbox(acks)
-                if outcome == "stop":
+            async with open_checkpointer(self.settings) as saver:
+                graph = build_agent_graph(saver)
+                config = {"configurable": {"thread_id": run_id, "runtime": self}}
+                while True:
+                    resume = self._pending_resume.pop(run_id, None)
+                    if resume is not None:
+                        await graph.ainvoke(Command(resume=resume), config)
+                    else:
+                        snap = await graph.aget_state(config)
+                        if snap.next:
+                            st = self.get(run_id)
+                            if st["status"] in ("awaiting_approval", "awaiting_input"):
+                                # Parked on a human gate — exit; approve/reject will relaunch.
+                                return
+                            await graph.ainvoke(None, config)
+                        else:
+                            st = self.get(run_id)
+                            if st["status"] in TERMINAL:
+                                return
+                            if st["status"] in ("awaiting_approval", "awaiting_input"):
+                                return
+                            # paused / needs_attention / interrupted / queued → continue
+                            if st["status"] != "running":
+                                self._set_status(st, "running")
+                            await graph.ainvoke(st, config)
+
+                    self._publish_gate_if_needed(run_id)
+                    if run_id in self._pending_resume:
+                        continue
+                    st = self.get(run_id)
+                    if st["status"] in ("awaiting_approval", "awaiting_input"):
+                        return
+                    if st["status"] in TERMINAL | {"paused", "needs_attention", "interrupted"}:
+                        return
+                    # Graph ended a continue-cycle at END while still marked running —
+                    # should be rare; avoid a tight loop.
+                    if st["status"] == "running":
+                        continue
                     return
         except asyncio.CancelledError:
-            raise  # process shutdown: the run stays "running" in the DB and recover() marks it interrupted
+            raise  # process shutdown: recover() marks interrupted
         except Exception as e:  # noqa: BLE001
             log.exception("run %s failed", run_id)
-            st = self.get(run_id)  # discard the half-finished step; keep the last good checkpoint
+            st = self.get(run_id)
             st["error"] = f"{type(e).__name__}: {e}"
             self._set_status(st, "failed", f"{st['error']}. Resume to retry from the last checkpoint.")
         finally:
             self._tasks.pop(run_id, None)
-
-    async def _step(self, st: dict) -> tuple[list[int], str]:
-        st["step"] += 1
-        step = st["step"]
-
-        inbox = self.store.peek_inbox(st["run_id"])
-        for item in inbox:
-            st["history"].append({"role": "user", "content": f"[Operator message] {item['text']}", "step": step})
-            st["operator_log"].append({"step": step, "decision": "message", "text": item["text"], "at": item["ts"]})
-        acks = [i["id"] for i in inbox]
-
-        messages, stats = build_context(st, self.settings)
-        st["last_context"] = stats
-        if stats["dropped_groups"] > st["compacted_groups"]:
-            self._emit(st, "context.compacted", {"dropped_groups": stats["dropped_groups"], "budget": stats["budget"]})
-        st["compacted_groups"] = stats["dropped_groups"]
-
-        t0 = time.perf_counter()
-        resp = await self._call_llm(st, messages)
-        ms = int((time.perf_counter() - t0) * 1000)
-        u = st["usage"]
-        cost = (resp.input_tokens * self.settings.cost_in_per_mtok + resp.output_tokens * self.settings.cost_out_per_mtok) / 1e6
-        u["llm_calls"] += 1
-        u["input_tokens"] += resp.input_tokens
-        u["output_tokens"] += resp.output_tokens
-        u["cost_usd"] = round(u["cost_usd"] + cost, 6)
-        u["llm_ms"] += ms
-        self._emit(st, "llm.call", {"model": resp.model, "input_tokens": resp.input_tokens, "output_tokens": resp.output_tokens,
-                                    "latency_ms": ms, "cost_usd": round(cost, 6), "context": stats, "tool_calls": len(resp.tool_calls)})
-
-        calls = resp.tool_calls
-        assistant = {"role": "assistant", "text": resp.text, "step": step,
-                     "tool_calls": [{"id": c.id, "name": c.name, "args": c.args} for c in calls]}
-        if resp.raw:  # e.g. Gemini thought signatures: checkpointed so they survive a restart
-            assistant["raw"] = resp.raw
-        st["history"].append(assistant)
-        if resp.text:
-            self._emit(st, "agent.message", {"text": resp.text})
-        if not calls:
-            st["nudges"] += 1
-            if st["nudges"] > 2:
-                self._set_status(st, "needs_attention", "The agent stopped calling tools. Send guidance and resume.")
-                return acks, "stop"
-            st["history"].append({"role": "user", "content": NUDGE, "step": step})
-            return acks, "continue"
-        st["nudges"] = 0
-
-        for c in calls:
-            spec = TOOLS.get(c.name)
-            self._emit(st, "tool.call", {"id": c.id, "name": c.name, "args": c.args, "kind": spec.kind if spec else "unknown"})
-
-        results: dict[str, tuple] = {}
-        reads: list[tuple[ToolCall, ToolSpec]] = []
-        gate: dict | None = None
-        finish: ToolCall | None = None
-        for c in calls:
-            spec = TOOLS.get(c.name)
-            if spec is None:
-                results[c.id] = (f"Unknown tool '{c.name}'. Available tools: {', '.join(TOOLS)}", True, {})
-            elif spec.kind == "read":
-                reads.append((c, spec))
-            elif c.name == "finish":
-                finish = c
-            elif c.name == "update_working_memory":
-                results[c.id] = self._apply_memory(st, c, spec)
-            elif gate is not None:  # write tools and ask_operator: at most one human gate per step
-                results[c.id] = ("Not executed: only one production change or operator question can be pending at a time. "
-                                 "Re-issue it after the current one is resolved.", True, {})
-            else:
-                outcome = self._gate(st, c, spec, step)
-                if isinstance(outcome, tuple):
-                    results[c.id] = outcome
-                else:
-                    gate = outcome
-
-        if reads:  # independent read-only calls run in parallel
-            outs = await asyncio.gather(*(self._exec_read(st, c, spec) for c, spec in reads))
-            for (c, _), out in zip(reads, outs):
-                results[c.id] = out
-
-        done = None
-        if finish is not None:
-            if gate is not None:
-                results[finish.id] = ("Not finished: an operator decision is still pending.", True, {})
-            else:
+            should = run_id in self._pending_resume or run_id in self._relaunch
+            self._relaunch.discard(run_id)
+            if should:
                 try:
-                    done = TOOLS["finish"].parse(finish.args)
-                    results[finish.id] = ("Run finished.", False, {})
-                except ToolArgsError as e:
-                    results[finish.id] = (f"Invalid arguments for finish: {e}", True, {})
-
-        for c in calls:  # keep results in the order the model issued the calls
-            if c.id in results:
-                self._record(st, step, c, *results[c.id])
-
-        guard = LoopGuard(self.settings.max_identical_tool_calls)
-        guard.loads(st.get("loop_guard"))
-        for c in calls:
-            if c.id in results:  # count successes and failures — repeating a broken call is the failure mode
-                guard.record(c.name, c.args)
-        st["loop_guard"] = guard.dumps()
-        stop, reason = guard.should_stop()
-        if stop and done is None and gate is None:
-            self._set_status(st, "needs_attention", reason)
-            return acks, "stop"
-
-        if done is not None:
-            self._finish(st, done.model_dump())
-            return acks, "stop"
-        if gate is not None:
-            st["pending"] = gate
-            if gate["kind"] == "approval":
-                self._emit(st, "approval.requested", gate)
-                self._set_status(st, "awaiting_approval", f"Approve, edit, or reject {gate['tool']}({brief_args(gate['args'])}).")
-            else:
-                self._emit(st, "input.requested", gate)
-                self._set_status(st, "awaiting_input", "The agent asked the operator a question.")
-            return acks, "stop"
-        return acks, "continue"
+                    self._tasks[run_id] = asyncio.get_running_loop().create_task(self._drive(run_id))
+                except RuntimeError:
+                    pass
 
     # ---- step helpers -----------------------------------------------------------------------
     async def _call_llm(self, st: dict, messages: list[dict]):
         attempts = self.settings.llm_max_attempts
-        for attempt in range(1, attempts + 1):
-            try:
-                with otel_span(
-                    "chat",
-                    **{
-                        "gen_ai.request.model": getattr(self.llm, "model", ""),
-                        "gen_ai.provider.name": getattr(self.llm, "provider", ""),
-                        "run.id": st["run_id"],
-                        "gen_ai.operation.name": "chat",
-                    },
-                ) as sp:
-                    resp = await self.llm.complete(SYSTEM_PROMPT, messages, self.tools, st)
-                    sp["gen_ai.usage.input_tokens"] = resp.input_tokens
-                    sp["gen_ai.usage.output_tokens"] = resp.output_tokens
-                    sp["gen_ai.response.model"] = resp.model
-                    self._emit(st, "gen_ai.span", {k: sp[k] for k in sp if k != "error.message"})
-                    return resp
-            except LLMTransientError as e:
-                if attempt == attempts:
+        attempt = 0
+        async for attempt_ctl in AsyncRetrying(
+            stop=stop_after_attempt(attempts),
+            wait=wait_exponential_jitter(
+                initial=self.settings.llm_backoff_s,
+                max=self.settings.llm_max_backoff_s,
+            ),
+            retry=retry_if_exception_type(LLMTransientError),
+            reraise=True,
+        ):
+            with attempt_ctl:
+                attempt += 1
+                try:
+                    with otel_span(
+                        "chat",
+                        **{
+                            "gen_ai.request.model": getattr(self.llm, "model", ""),
+                            "gen_ai.provider.name": getattr(self.llm, "provider", ""),
+                            "run.id": st["run_id"],
+                            "gen_ai.operation.name": "chat",
+                        },
+                    ) as sp:
+                        resp = await self.llm.complete(SYSTEM_PROMPT, messages, self.tools, st)
+                        sp["gen_ai.usage.input_tokens"] = resp.input_tokens
+                        sp["gen_ai.usage.output_tokens"] = resp.output_tokens
+                        sp["gen_ai.response.model"] = resp.model
+                        self._emit(st, "gen_ai.span", {k: sp[k] for k in sp if k != "error.message"})
+                        return resp
+                except LLMTransientError as e:
+                    delay = self.settings.llm_backoff_s * 2 ** max(attempt - 1, 0)
+                    if e.retry_after_s is not None:
+                        delay = e.retry_after_s
+                    elif "quota" in str(e).lower() or "rate limit" in str(e).lower():
+                        delay = delay * 10
+                    delay = min(max(delay, self.settings.llm_backoff_s), self.settings.llm_max_backoff_s)
+                    self._emit(st, "llm.retry", {"attempt": attempt, "error": str(e)[:200], "retry_in_s": delay})
+                    if e.retry_after_s is not None:
+                        await asyncio.sleep(min(e.retry_after_s, self.settings.llm_max_backoff_s))
                     raise
-                base = self.settings.llm_backoff_s * 2 ** (attempt - 1)
-                if e.retry_after_s is not None:
-                    delay = e.retry_after_s
-                elif "quota" in str(e).lower() or "rate limit" in str(e).lower():
-                    delay = base * 10  # quota exhaustion usually needs a longer cool-down
-                else:
-                    delay = base
-                delay = min(max(delay, self.settings.llm_backoff_s), self.settings.llm_max_backoff_s)
-                self._emit(st, "llm.retry", {"attempt": attempt, "error": str(e)[:200], "retry_in_s": delay})
-                await asyncio.sleep(delay)
 
     async def _exec_read(self, st: dict, call: ToolCall, spec: ToolSpec) -> tuple:
         try:
