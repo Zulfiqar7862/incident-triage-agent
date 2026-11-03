@@ -246,3 +246,13 @@ def test_settings_validation(monkeypatch):
     monkeypatch.setenv("REQUIRE_LLM", "maybe")
     with pytest.raises(ConfigError, match="REQUIRE_LLM"):
         Settings.from_env()
+
+
+def test_check_llm_script_against_strict_gemini(monkeypatch, capsys):
+    import scripts.check_llm as check
+
+    mock = StrictGemini()
+    monkeypatch.setattr(check, "make_llm", lambda s: GeminiLLM("gemini-3.5-flash", KEY, 30, transport=httpx.MockTransport(mock)))
+    assert asyncio.run(check.main()) == 0
+    out = capsys.readouterr().out
+    assert "PASS" in out and "thought signatures" in out
