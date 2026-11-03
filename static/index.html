@@ -3,468 +3,54 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Incident triage agent — durable AI operator console with human approval gates">
 <title>Incident triage agent</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-<style>
-:root {
-  --paper: #eceff2; --surface: #ffffff; --sunk: #f4f6f8; --rule: #d6dbe1;
-  --ink: #1a2129; --muted: #5b6672; --faint: #8b95a1;
-  --agent: #2b59c3; --agent-bg: #e9effc;
-  --gate: #a85f00; --gate-bg: #fff2d9; --gate-rule: #e8b45c;
-  --bad: #b42318; --bad-bg: #fdeceb; --good: #217a55; --good-bg: #e5f4ec;
-  --sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  color-scheme: light;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --paper: #12161b; --surface: #1a2027; --sunk: #151a20; --rule: #2b333d;
-    --ink: #e4e8ec; --muted: #a2acb7; --faint: #6f7a86;
-    --agent: #8aa8ff; --agent-bg: #1c2745;
-    --gate: #f2b155; --gate-bg: #2d2313; --gate-rule: #7a5a26;
-    --bad: #ff8a80; --bad-bg: #331a19; --good: #5cc99a; --good-bg: #142b21;
-    color-scheme: dark;
-  }
-}
-* { box-sizing: border-box; }
-html, body { height: 100%; margin: 0; }
-body { background: var(--paper); color: var(--ink); font: 14px/1.5 var(--sans); display: flex; flex-direction: column; }
-:focus-visible { outline: 2px solid var(--agent); outline-offset: 2px; }
-button, select, input, textarea { font: inherit; color: inherit; }
-select, input, textarea { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 6px 9px; }
-button { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
-button:hover:not(:disabled) { border-color: var(--faint); }
-button:disabled { opacity: .45; cursor: not-allowed; }
-.btn-primary { background: var(--ink); color: var(--paper); border-color: var(--ink); font-weight: 500; }
-.btn-approve { background: var(--good); color: var(--surface); border-color: var(--good); font-weight: 600; }
-.btn-danger { color: var(--bad); }
-
-header { display: flex; align-items: center; gap: 14px; padding: 10px 18px; background: var(--surface); border-bottom: 1px solid var(--rule); flex-wrap: wrap; }
-.brand { font-weight: 600; font-size: 15px; letter-spacing: -0.01em; }
-.mode { font-size: 12.5px; color: var(--muted); }
-.mode.offline { color: var(--gate); }
-header .spacer { flex: 1; }
-
-main { flex: 1; min-height: 0; display: grid; grid-template-columns: 240px minmax(0, 1fr) 360px; }
-.col { overflow: auto; min-height: 0; }
-.runs { border-right: 1px solid var(--rule); padding: 14px 10px; }
-.side { border-left: 1px solid var(--rule); padding: 16px; background: var(--surface); overflow-wrap: anywhere; }
-h2 { font-size: 13px; font-weight: 600; color: var(--muted); margin: 0 0 8px; }
-.side h2 { color: var(--ink); }
-
-#runList { list-style: none; margin: 0; padding: 0; }
-#runList li { padding: 8px 10px; border-radius: 6px; cursor: pointer; margin-bottom: 2px; }
-#runList li:hover { background: var(--sunk); }
-#runList li.sel { background: var(--surface); box-shadow: inset 3px 0 0 var(--ink); }
-.rl-title { font-weight: 500; font-size: 13px; }
-.rl-sub { display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: center; margin-top: 3px; font-size: 12px; color: var(--muted); }
-
-.status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; }
-.status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
-.status.running::before { background: var(--agent); animation: pulse 1.4s ease-in-out infinite; }
-.status.awaiting_approval::before, .status.awaiting_input::before, .status.paused::before,
-.status.interrupted::before, .status.needs_attention::before { background: var(--gate); }
-.status.completed::before { background: var(--good); }
-.status.failed::before, .status.cancelled::before { background: var(--bad); }
-@keyframes pulse { 50% { opacity: .3; } }
-@media (prefers-reduced-motion: reduce) { .status.running::before { animation: none; } }
-
-/* ---- trace ---- */
-.trace { padding: 22px 28px 80px; }
-.trace-head h1 { font-size: 20px; font-weight: 600; letter-spacing: -0.015em; margin: 0 0 4px; max-width: 70ch; }
-.trace-head p { margin: 0 0 18px; color: var(--muted); max-width: 80ch; }
-.empty { color: var(--muted); padding: 48px 0; max-width: 52ch; }
-.ev { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 0 10px; position: relative; }
-.ev::before { content: ""; position: absolute; left: 21px; top: 0; bottom: 0; width: 1px; background: var(--rule); }
-.gut { font: 500 11.5px/1 var(--mono); color: var(--faint); text-align: right; padding-top: 11px; padding-right: 8px; position: relative; z-index: 1; }
-.gut span { background: var(--paper); padding: 2px 0 2px 4px; }
-.body { padding: 4px 0; min-width: 0; }
-.note { font-size: 12.5px; color: var(--muted); padding: 5px 0; }
-.note b { color: var(--ink); font-weight: 500; }
-.telemetry { font: 11.5px/1.5 var(--mono); color: var(--faint); padding: 5px 0; display: flex; flex-wrap: wrap; gap: 2px 14px; }
-.thought { background: var(--agent-bg); border-radius: 8px; padding: 9px 13px; white-space: pre-wrap; max-width: 80ch; }
-.tool { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; }
-.tool-head { display: flex; align-items: center; gap: 10px; padding: 7px 12px; font: 12.5px/1.4 var(--mono); }
-.tool-head .name { font-weight: 500; }
-.tool-head .args { color: var(--muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tag { font: 500 11px/1.6 var(--sans); padding: 0 8px; border-radius: 999px; background: var(--sunk); color: var(--muted); white-space: nowrap; }
-.tag.ok { background: var(--good-bg); color: var(--good); }
-.tag.err { background: var(--bad-bg); color: var(--bad); }
-.tag.wait { background: var(--gate-bg); color: var(--gate); }
-.tool.write { border-color: var(--gate-rule); }
-.tool details > summary { cursor: pointer; padding: 3px 12px 7px; font-size: 12px; color: var(--muted); }
-pre.out { margin: 0; padding: 10px 12px; background: var(--sunk); border-top: 1px solid var(--rule); font: 11.5px/1.55 var(--mono); white-space: pre-wrap; word-break: break-word; max-height: 360px; overflow: auto; }
-.retry { padding: 3px 12px 6px; font-size: 12px; color: var(--gate); }
-.gate { border-left: 4px solid var(--gate); background: var(--gate-bg); border-radius: 0 8px 8px 0; padding: 10px 14px; }
-.gate code, .side code { font-family: var(--mono); font-size: 12.5px; }
-.outcome { border-left: 4px solid var(--good); background: var(--good-bg); border-radius: 0 8px 8px 0; padding: 10px 14px; }
-.outcome.bad { border-color: var(--bad); background: var(--bad-bg); }
-.blocked { border-left: 4px solid var(--bad); background: var(--bad-bg); border-radius: 0 8px 8px 0; padding: 8px 14px; font-size: 13px; }
-
-/* ---- side panel ---- */
-.side section { padding-bottom: 16px; margin-bottom: 16px; border-bottom: 1px solid var(--rule); }
-.side section:last-child { border-bottom: 0; }
-.side section:empty { display: none; }
-.reason { color: var(--muted); font-size: 12.5px; margin: 6px 0 0; }
-.controls { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
-.approval { background: var(--gate-bg); border: 1px solid var(--gate-rule); border-radius: 10px; padding: 14px; }
-.approval h2 { color: var(--gate); }
-.approval textarea { width: 100%; min-height: 120px; font: 12px/1.5 var(--mono); margin: 6px 0 10px; resize: vertical; }
-.meter { height: 6px; border-radius: 3px; background: var(--surface); overflow: hidden; margin: 4px 0 10px; }
-.meter > i { display: block; height: 100%; background: var(--gate); }
-.row { display: flex; gap: 6px; }
-.row input { flex: 1; min-width: 0; }
-label.small, .small { font-size: 12px; color: var(--muted); }
-ol.plan { margin: 0; padding-left: 20px; }
-ol.plan li { margin: 3px 0; }
-.hyp { padding: 8px 10px; border-radius: 6px; background: var(--sunk); margin-bottom: 6px; font-size: 13px; }
-.hyp .st { font-size: 11.5px; font-weight: 600; margin-right: 6px; }
-.hyp.confirmed .st { color: var(--good); }
-.hyp.investigating .st { color: var(--gate); }
-.hyp.rejected { color: var(--muted); }
-.hyp.rejected .t { text-decoration: line-through; }
-.hyp .ev-text { color: var(--muted); font-size: 12px; margin-top: 3px; }
-.kv { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; font-size: 13px; }
-.kv dt { color: var(--muted); }
-.kv dd { margin: 0; font-family: var(--mono); font-size: 12.5px; text-align: right; }
-.ctxbar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--sunk); margin: 8px 0 6px; }
-.ctxbar i { display: block; height: 100%; }
-.legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11.5px; color: var(--muted); }
-.legend span::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; background: var(--c); }
-.report p { margin: 6px 0; }
-.report ul { margin: 4px 0 0; padding-left: 18px; }
-
-dialog { width: min(920px, 94vw); max-height: 88vh; padding: 0; border: 1px solid var(--rule); border-radius: 12px; background: var(--surface); color: var(--ink); }
-dialog::backdrop { background: rgba(10, 14, 20, .5); }
-.dlg-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--rule); }
-.dlg-body { overflow: auto; max-height: calc(88vh - 56px); padding: 14px 16px; }
-.msg { margin-bottom: 12px; }
-.msg .role { font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 4px; }
-.msg pre.out { border: 1px solid var(--rule); border-radius: 6px; }
-
-@media (max-width: 1150px) {
-  main { grid-template-columns: 200px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
-  .side { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--rule); max-height: 45vh; }
-}
-@media (max-width: 720px) {
-  /* On phones the page scrolls as one column, with run controls above the trace. */
-  html, body { height: auto; }
-  main { display: flex; flex-direction: column; }
-  .col { overflow: visible; }
-  .runs { border-right: 0; border-bottom: 1px solid var(--rule); max-height: 170px; overflow: auto; }
-  .side { order: 1; max-height: none; border-left: 0; border-bottom: 1px solid var(--rule); }
-  .trace { order: 2; padding: 16px 14px 60px; }
-  .ev { grid-template-columns: 34px minmax(0, 1fr); }
-  .ev::before { left: 16px; }
-}
-</style>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;650&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/app.css">
 </head>
 <body>
-<header>
-  <span class="brand">Incident triage agent</span>
-  <span id="mode" class="mode"></span>
+<a class="sr-only" href="#traceCol">Skip to live trace</a>
+<header class="app-header">
+  <div class="brand" aria-label="Incident triage agent">
+    <span class="brand-mark" aria-hidden="true">IT</span>
+    <span>Incident triage</span>
+  </div>
+  <span id="mode" class="mode" role="status" aria-live="polite"></span>
   <span class="spacer"></span>
-  <label class="small" for="operator">Signed in as</label>
-  <input id="operator" placeholder="Your name" aria-label="Your name for the audit log" style="width:140px">
-  <select id="scenario" aria-label="Incident scenario"></select>
-  <button id="startBtn" class="btn-primary">Start triage</button>
+  <div class="header-actions">
+    <label class="small" for="operator">Signed in as</label>
+    <input id="operator" placeholder="Your name" autocomplete="name" aria-label="Your name for the audit log" style="width:140px">
+    <label class="sr-only" for="scenario">Incident scenario</label>
+    <select id="scenario" aria-label="Incident scenario"></select>
+    <button id="startBtn" class="btn-primary" type="button">Start triage</button>
+  </div>
 </header>
-<main>
-  <nav class="col runs" aria-label="Runs"><h2>Runs</h2><ul id="runList"></ul></nav>
-  <section class="col trace" id="traceCol" aria-live="polite">
-    <div id="traceHead" class="trace-head"><p class="empty">Choose a scenario and start triage. The agent's reasoning, tool calls, and any change it wants to make appear here as they happen.</p></div>
+<div id="banner" class="banner" role="status" aria-live="polite"></div>
+<main class="app">
+  <nav class="col runs" aria-label="Runs">
+    <h2 class="section-label">Runs</h2>
+    <ul id="runList"></ul>
+  </nav>
+  <section class="col trace" id="traceCol" aria-live="polite" aria-label="Live reasoning trace">
+    <div id="traceHead" class="trace-head">
+      <div class="empty-state">
+        <strong>Ready when you are</strong>
+        Choose a scenario and start triage. The agent's plan, tool calls, and any production change it wants to make appear here as they happen — with a durable approval gate before anything mutates the cluster.
+      </div>
+    </div>
     <div id="trace"></div>
   </section>
   <aside class="col side" id="side" aria-label="Run controls and state"></aside>
 </main>
-<dialog id="ctxDlg">
-  <div class="dlg-head"><h2 style="margin:0">What the model sees on its next step</h2><button id="ctxClose">Close</button></div>
+<dialog id="ctxDlg" aria-labelledby="ctxTitle">
+  <div class="dlg-head">
+    <h2 id="ctxTitle" style="margin:0;font-size:15px">What the model sees on its next step</h2>
+    <button id="ctxClose" type="button">Close</button>
+  </div>
   <div class="dlg-body" id="ctxBody"></div>
 </dialog>
-
-<script>
-const $ = s => document.querySelector(s);
-const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const num = n => Number(n || 0).toLocaleString();
-const human = s => (s || '').replaceAll('_', ' ');
-const argStr = a => Object.entries(a || {}).map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`).join(', ');
-const withoutKeys = (o, ks) => Object.fromEntries(Object.entries(o || {}).filter(([k]) => !ks.includes(k)));
-const TERMINAL = ['completed', 'failed', 'cancelled'];
-const RESUMABLE = ['paused', 'interrupted', 'failed', 'needs_attention'];
-
-let runId = null, es = null, pendingKey = null, refreshTimer = null, cards = {};
-
-// Auth: the API token lives only in this tab (sessionStorage); the operator name is remembered.
-const store = { get: (s, k) => { try { return s.getItem(k) || ''; } catch { return ''; } },
-                set: (s, k, v) => { try { s.setItem(k, v); } catch {} } };
-const token = () => store.get(sessionStorage, 'apiToken');
-async function api(path, opts = {}, retried = false) {
-  const headers = { 'content-type': 'application/json', 'x-operator': $('#operator').value.trim() };
-  if (token()) headers.authorization = `Bearer ${token()}`;
-  const r = await fetch(path, { ...opts, headers });
-  if (r.status === 401 && !retried) {
-    const t = prompt('This server requires an API token. Paste it to continue:');
-    if (t) { store.set(sessionStorage, 'apiToken', t.trim()); return api(path, opts, true); }
-  }
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(typeof j.detail === 'string' ? j.detail : `${r.status} ${r.statusText}`);
-  return j;
-}
-const post = (p, body) => api(p, { method: 'POST', body: JSON.stringify(body || {}) });
-
-async function init() {
-  $('#operator').value = store.get(localStorage, 'operator');
-  $('#operator').onchange = () => store.set(localStorage, 'operator', $('#operator').value.trim());
-  const h = await api('/api/health');
-  const mode = $('#mode');
-  if (h.llm.provider === 'scripted') {
-    mode.textContent = 'Offline demo policy: set an API key to run the real model';
-    mode.classList.add('offline');
-  } else mode.textContent = `Model: ${h.llm.model}`;
-  const sc = await api('/api/scenarios');
-  $('#scenario').innerHTML = sc.map(s => `<option value="${esc(s.id)}" title="${esc(s.description)}">${esc(s.title)}</option>`).join('');
-  $('#startBtn').onclick = async () => {
-    try { const r = await post('/api/runs', { scenario_id: $('#scenario').value }); await loadRuns(); select(r.run_id); }
-    catch (e) { alert(e.message); }
-  };
-  $('#ctxClose').onclick = () => $('#ctxDlg').close();
-  await loadRuns();
-  const fromHash = location.hash.slice(1);
-  if (fromHash) select(fromHash);
-  setInterval(loadRuns, 4000);
-}
-
-async function loadRuns() {
-  const runs = await api('/api/runs').catch(() => []);
-  $('#runList').innerHTML = runs.length
-    ? runs.map(r => `<li data-id="${esc(r.id)}" class="${r.id === runId ? 'sel' : ''}" tabindex="0">
-        <div class="rl-title">${esc(r.title)}</div>
-        <div class="rl-sub"><span class="status ${esc(r.status)}">${esc(human(r.status))}</span><span>${esc(r.id)}</span></div></li>`).join('')
-    : '<li class="small">No runs yet.</li>';
-  $('#runList').querySelectorAll('li[data-id]').forEach(li => {
-    li.onclick = () => select(li.dataset.id);
-    li.onkeydown = e => { if (e.key === 'Enter') select(li.dataset.id); };
-  });
-}
-
-function select(id) {
-  runId = id; history.replaceState(null, '', '#' + id);
-  pendingKey = null; cards = {};
-  document.querySelectorAll('#runList li').forEach(li => li.classList.toggle('sel', li.dataset.id === id));
-  $('#trace').innerHTML = ''; $('#side').innerHTML = ''; delete $('#side').dataset.run;
-  if (es) es.close();
-  // EventSource cannot send headers, so the stream takes the token as a query parameter.
-  es = new EventSource(`/api/runs/${encodeURIComponent(id)}/stream` + (token() ? `?token=${encodeURIComponent(token())}` : ''));
-  es.onmessage = e => { const ev = JSON.parse(e.data); if (ev.run_id === runId) { render(ev); scheduleRefresh(); } };
-  refresh();
-}
-
-function scheduleRefresh() { clearTimeout(refreshTimer); refreshTimer = setTimeout(refresh, 200); }
-async function refresh() {
-  if (!runId) return;
-  const id = runId;
-  try {
-    const s = await api(`/api/runs/${encodeURIComponent(id)}`);
-    if (id !== runId) return;
-    $('#traceHead').innerHTML = `<h1>${esc(s.title)}</h1><p>${esc(s.task)}</p>`;
-    renderSide(s);
-  } catch (e) { $('#traceHead').innerHTML = `<p class="empty">${esc(e.message)}</p>`; }
-}
-
-/* ---------------- trace ---------------- */
-function el(html) { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstElementChild; }
-function add(step, inner) {
-  const col = $('#traceCol');
-  const nearBottom = col.scrollHeight - col.scrollTop - col.clientHeight < 160;
-  const node = el(`<div class="ev"><div class="gut">${step ? `<span>${step}</span>` : ''}</div><div class="body">${inner}</div></div>`);
-  $('#trace').appendChild(node);
-  if (nearBottom) col.scrollTop = col.scrollHeight;
-  return node;
-}
-let lastStep = null;
-function stepLabel(p) { const s = p && p.step ? p.step : null; if (s === lastStep) return ''; lastStep = s; return s ? `s${s}` : ''; }
-const note = (p, html) => add(stepLabel(p), `<div class="note">${html}</div>`);
-
-function toolCard(p) {
-  const kind = p.kind === 'write' ? 'write' : '';
-  const node = add(stepLabel(p), `<div class="tool ${kind}"><div class="tool-head"><span class="name">${esc(p.name)}</span>
-    <span class="args" title="${esc(argStr(p.args))}">${esc(argStr(p.args))}</span>
-    <span class="tag ${p.kind === 'write' ? 'wait' : ''}">${p.kind === 'write' ? 'needs approval' : 'running'}</span></div><div class="extra"></div></div>`);
-  cards[p.id] = node; return node;
-}
-
-function render(ev) {
-  const p = ev.payload || {};
-  switch (ev.type) {
-    case 'run.created': lastStep = null; note(p, `Run started with <b>${esc(p.model)}</b>`); break;
-    case 'memory.recalled': note(p, `Recalled ${p.memories.length} past incident(s) for this service from long-term memory`); break;
-    case 'memory.saved': note(p, 'Saved a short, redacted summary of this incident to long-term memory'); break;
-    case 'run.status': loadRuns(); note(p, `Status: <b>${esc(human(p.status))}</b>${p.reason ? `. ${esc(p.reason)}` : ''}`); break;
-    case 'operator.control': note(p, `Operator asked to <b>${esc(p.action)}</b>`); break;
-    case 'llm.call': {
-      const c = p.context || {};
-      add(stepLabel(p), `<div class="telemetry"><span>${num(p.input_tokens)} tokens in</span><span>${num(p.output_tokens)} out</span>
-        <span>${num(p.latency_ms)} ms</span><span>$${(p.cost_usd || 0).toFixed(4)}</span>
-        <span>context ${num(c.total_tokens)} of ${num(c.budget)}</span>${c.dropped_groups ? `<span>${c.dropped_groups} old steps compacted</span>` : ''}</div>`);
-      break;
-    }
-    case 'llm.retry': note(p, `Model call failed (${esc(p.error)}). Retrying in ${p.retry_in_s}s.`); break;
-    case 'agent.message': add(stepLabel(p), `<div class="thought">${esc(p.text)}</div>`); break;
-    case 'tool.call': toolCard(p); break;
-    case 'tool.retry': {
-      const c = cards[p.id];
-      if (c) c.querySelector('.extra').insertAdjacentHTML('beforeend', `<div class="retry">Attempt ${p.attempt} failed: ${esc(p.error)}. Retrying in ${p.retry_in_s}s.</div>`);
-      break;
-    }
-    case 'tool.result': {
-      const c = cards[p.id] || toolCard({ ...p, args: {}, kind: 'read' });
-      const tag = c.querySelector('.tag');
-      tag.className = 'tag ' + (p.is_error ? 'err' : 'ok');
-      tag.textContent = (p.is_error ? 'error' : 'ok') + (p.duration_ms != null ? `, ${p.duration_ms} ms` : '') + (p.attempts > 1 ? `, ${p.attempts} tries` : '');
-      const trunc = p.truncated ? `, ${num(p.truncated.omitted_chars)} chars trimmed before the model saw it` : '';
-      c.querySelector('.extra').insertAdjacentHTML('beforeend',
-        `<details ${p.is_error ? 'open' : ''}><summary>Output (${num(p.content.length)} chars${trunc})</summary><pre class="out">${esc(p.content)}</pre></details>`);
-      break;
-    }
-    case 'memory.update': note(p, `Updated working memory: ${esc((p.changed || []).join(', ') || 'nothing')}`); break;
-    case 'context.compacted': note(p, `Compacted ${p.dropped_groups} oldest step(s) out of the transcript to stay under ${num(p.budget)} tokens. The action log keeps their outcomes.`); break;
-    case 'policy.blocked': add(stepLabel(p), `<div class="blocked">Blocked <code>${esc(p.tool)}</code>: confidence ${p.confidence} is below the ${p.min_confidence} minimum, so it went back to the agent instead of to you.</div>`); break;
-    case 'approval.requested': {
-      const c = cards[p.tool_call_id];
-      if (c) { const t = c.querySelector('.tag'); t.className = 'tag wait'; t.textContent = 'waiting for you'; }
-      add(stepLabel(p), `<div class="gate"><b>Waiting for your approval</b><br><code>${esc(p.tool)}(${esc(argStr(withoutKeys(p.args, ['reason', 'confidence'])))})</code></div>`);
-      break;
-    }
-    case 'approval.decided': note(p, `<b>${esc(p.actor || 'Operator')}</b> ${esc(p.decision)} ${esc(p.tool)}${p.edited ? ' with edited arguments' : ''}${p.feedback ? `: “${esc(p.feedback)}”` : ''}`); break;
-    case 'input.requested': add(stepLabel(p), `<div class="gate"><b>The agent asks:</b> ${esc(p.question)}</div>`); break;
-    case 'operator.message': note(p, `${esc(p.actor || 'Operator')} said: “${esc(p.text)}”${p.queued ? ' (the agent reads it at its next step)' : ''}`); break;
-    case 'run.finished': {
-      const r = p.result;
-      add(stepLabel(p), `<div class="outcome ${r.resolved ? '' : 'bad'}"><b>${r.resolved ? 'Resolved' : 'Not resolved'}.</b> ${esc(r.summary)}</div>`);
-      break;
-    }
-    default: note(p, esc(ev.type));
-  }
-}
-
-/* ---------------- side panel ---------------- */
-function renderSide(s) {
-  const side = $('#side');
-  if (side.dataset.run !== s.run_id) {
-    side.dataset.run = s.run_id;
-    side.innerHTML = `<section id="sCtl"></section><section id="sPending"></section>
-      <section id="sCompose"><h2>Message the agent</h2>
-        <div class="row"><input id="opMsg" placeholder="Add context or correct its course" aria-label="Message to the agent"><button id="opSend">Send</button></div>
-        <p class="reason">The agent reads it at its next step.</p></section>
-      <section id="sResult"></section><section id="sPlan"></section><section id="sHyp"></section>
-      <section id="sTel"></section><section id="sMem"></section>`;
-    $('#opSend').onclick = sendMsg;
-    $('#opMsg').onkeydown = e => { if (e.key === 'Enter') sendMsg(); };
-  }
-
-  $('#sCtl').innerHTML = `<div class="status ${esc(s.status)}" style="font-size:14px">${esc(human(s.status))}</div>
-    ${s.status_reason ? `<p class="reason">${esc(s.status_reason)}</p>` : ''}
-    <div class="controls">
-      <button data-a="pause" ${s.active && s.status === 'running' ? '' : 'disabled'}>Pause</button>
-      <button data-a="resume" ${RESUMABLE.includes(s.status) ? '' : 'disabled'}>Resume</button>
-      <button data-a="cancel" class="btn-danger" ${TERMINAL.includes(s.status) ? 'disabled' : ''}>Cancel run</button>
-      <button data-a="context">Inspect context</button>
-    </div>`;
-  $('#sCtl').querySelectorAll('button[data-a]').forEach(b => b.onclick = () => control(b.dataset.a));
-
-  const p = s.pending;
-  const key = p ? `${p.tool_call_id}:${s.status}` : '';
-  if (key !== pendingKey) {
-    pendingKey = key;
-    if (p && s.status === 'awaiting_approval') {
-      const conf = Math.round((p.args.confidence || 0) * 100);
-      $('#sPending').innerHTML = `<div class="approval"><h2>Approve a production change</h2>
-        <p style="margin:0 0 6px">The agent wants to run <code>${esc(p.tool)}</code> on <b>${esc(p.args.service)}</b>.</p>
-        <p class="small" style="margin:0 0 8px">${esc(p.args.reason)}</p>
-        <div class="small">Agent confidence: ${conf}%</div><div class="meter"><i style="width:${conf}%"></i></div>
-        <label class="small" for="apArgs">Arguments (edit before approving if needed)</label>
-        <textarea id="apArgs" spellcheck="false">${esc(JSON.stringify(p.args, null, 2))}</textarea>
-        <button class="btn-approve" id="apOk">Approve and run</button>
-        <div class="row" style="margin-top:10px"><input id="apFb" placeholder="Reason for rejecting (sent to the agent)" aria-label="Rejection feedback"><button class="btn-danger" id="apNo">Reject</button></div></div>`;
-      $('#apOk').onclick = approve; $('#apNo').onclick = reject;
-    } else if (p && s.status === 'awaiting_input') {
-      $('#sPending').innerHTML = `<div class="approval"><h2>The agent needs an answer</h2><p style="margin:0 0 10px">${esc(p.question)}</p>
-        <div class="row"><input id="ansTxt" placeholder="Your answer" aria-label="Answer"><button class="btn-approve" id="ansOk">Send answer</button></div></div>`;
-      $('#ansOk').onclick = () => act(() => post(`/api/runs/${runId}/message`, { text: $('#ansTxt').value }));
-    } else $('#sPending').innerHTML = '';
-  }
-  $('#sCompose').style.display = TERMINAL.includes(s.status) || s.status === 'awaiting_input' ? 'none' : '';
-
-  const r = s.result;
-  $('#sResult').innerHTML = r ? `<div class="report"><h2>Incident report</h2>
-    <div class="outcome ${r.resolved ? '' : 'bad'}"><b>${r.resolved ? 'Resolved' : 'Not resolved'}</b><p>${esc(r.summary)}</p></div>
-    <p><b>Root cause.</b> ${esc(r.root_cause)}</p>${r.fix_applied ? `<p><b>Fix.</b> <code>${esc(r.fix_applied)}</code></p>` : ''}
-    ${r.follow_ups?.length ? `<b>Follow-ups</b><ul>${r.follow_ups.map(f => `<li>${esc(f)}</li>`).join('')}</ul>` : ''}
-    <p class="reason">Simulator check: ${r.sim_resolved ? 'the incident really is fixed.' : 'the incident is NOT actually fixed.'}</p></div>` : '';
-
-  $('#sPlan').innerHTML = `<h2>Plan</h2>` + (s.plan.length ? `<ol class="plan">${s.plan.map(x => `<li>${esc(x)}</li>`).join('')}</ol>` : '<p class="small">No plan yet.</p>');
-  $('#sHyp').innerHTML = `<h2>Hypotheses</h2>` + (s.hypotheses.length ? s.hypotheses.map(h => `<div class="hyp ${esc(h.status)}"><span class="st">${esc(h.status)}</span><span class="t">${esc(h.text)}</span>${h.evidence ? `<div class="ev-text">${esc(h.evidence)}</div>` : ''}</div>`).join('') : '<p class="small">None yet.</p>');
-
-  const u = s.usage, c = s.last_context;
-  let ctx = '';
-  if (c) {
-    const w = v => Math.min(100, (v / c.budget) * 100).toFixed(1);
-    ctx = `<h2 style="margin-top:14px">Last context window</h2>
-      <div class="ctxbar" role="img" aria-label="${num(c.total_tokens)} of ${num(c.budget)} tokens">
-        <i style="width:${w(c.system_tokens + c.tools_tokens)}%;background:var(--faint)"></i>
-        <i style="width:${w(c.memory_tokens)}%;background:var(--agent)"></i>
-        <i style="width:${w(c.history_tokens)}%;background:var(--gate)"></i></div>
-      <div class="legend"><span style="--c:var(--faint)">System and tools</span><span style="--c:var(--agent)">Working memory</span><span style="--c:var(--gate)">Transcript</span></div>
-      <p class="reason">${num(c.total_tokens)} of ${num(c.budget)} estimated tokens. ${c.shrunk_messages} old outputs shortened, ${c.dropped_groups} old steps dropped.</p>`;
-  }
-  $('#sTel').innerHTML = `<h2>Telemetry</h2><dl class="kv">
-    <dt>Steps</dt><dd>${s.step} / ${s.max_steps}</dd>
-    <dt>Model calls</dt><dd>${u.llm_calls}</dd>
-    <dt>Tokens in / out</dt><dd>${num(u.input_tokens)} / ${num(u.output_tokens)}</dd>
-    <dt>Estimated cost</dt><dd>$${u.cost_usd.toFixed(4)}</dd>
-    <dt>Model time</dt><dd>${(u.llm_ms / 1000).toFixed(1)} s</dd>
-    <dt>Tool calls</dt><dd>${u.tool_calls}</dd>
-    <dt>Retries / errors</dt><dd>${u.tool_retries} / ${u.tool_errors}</dd>
-    <dt>Checkpoint</dt><dd>v${s.checkpoint_version}</dd></dl>${ctx}`;
-
-  $('#sMem').innerHTML = s.recalled_memories?.length ? `<h2>From past incidents</h2>${s.recalled_memories.map(m =>
-    `<div class="hyp"><div class="ev-text">${esc(m.date)}, ${m.age_days} days ago</div>${esc(m.root_cause)}</div>`).join('')}` : '';
-}
-
-async function act(fn) {
-  try { await fn(); pendingKey = null; await refresh(); loadRuns(); }
-  catch (e) { alert(e.message); }
-}
-async function approve() {
-  if (!$('#operator').value.trim()) { $('#operator').focus(); return alert('Enter your name first: approvals are recorded in the audit log.'); }
-  let args;
-  try { args = JSON.parse($('#apArgs').value); } catch { return alert('The arguments must be valid JSON.'); }
-  await act(() => post(`/api/runs/${runId}/approve`, { args }));
-}
-const reject = () => act(() => post(`/api/runs/${runId}/reject`, { feedback: $('#apFb').value }));
-async function sendMsg() {
-  const t = $('#opMsg').value.trim(); if (!t) return;
-  await act(() => post(`/api/runs/${runId}/message`, { text: t }));
-  $('#opMsg').value = '';
-}
-async function control(a) {
-  if (a === 'context') return showContext();
-  if (a === 'cancel' && !confirm('Cancel this run? It cannot be resumed afterwards.')) return;
-  await act(() => post(`/api/runs/${runId}/${a}`));
-}
-async function showContext() {
-  const c = await api(`/api/runs/${encodeURIComponent(runId)}/context`);
-  const show = m => m.role === 'assistant'
-    ? (m.text ? m.text + '\n' : '') + (m.tool_calls || []).map(t => `→ ${t.name}(${JSON.stringify(t.args)})`).join('\n')
-    : m.content;
-  $('#ctxBody').innerHTML = `<p class="small" style="margin-top:0">Rebuilt from the latest checkpoint, exactly as it will be sent. About ${num(c.stats.total_tokens)} of ${num(c.stats.budget)} tokens.</p>
-    <div class="msg"><div class="role">System prompt</div><pre class="out">${esc(c.system)}</pre></div>` +
-    c.messages.map(m => `<div class="msg"><div class="role">${esc(m.role === 'tool' ? `Tool result: ${m.name}` : m.role === 'assistant' ? 'Agent' : 'User')}</div><pre class="out">${esc(show(m))}</pre></div>`).join('');
-  $('#ctxDlg').showModal();
-}
-init();
-</script>
+<script src="/static/js/app.js" defer></script>
 </body>
 </html>
