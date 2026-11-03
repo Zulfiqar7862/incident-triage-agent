@@ -6,12 +6,11 @@ import asyncio
 import contextlib
 import time
 
-import pytest
 from app.config import Settings
 from app.context import build_context, truncate_output
 from app.llm import LLMResponse, LLMTransientError, ToolCall
 from app.main import create_app
-from app.runtime import RunStateError, Runtime
+from app.runtime import Runtime
 from app.scripted import ScriptedPolicy
 from app.store import Store
 from fastapi.testclient import TestClient
@@ -133,8 +132,7 @@ def test_approval_survives_restart_and_is_idempotent(tmp_path):
         rt2.recover()
         assert store.load(rid)["status"] == "awaiting_approval"  # a pending human decision is not lost
         rt2.approve(rid)
-        with pytest.raises(RunStateError):
-            rt2.approve(rid)  # double-click / replay does not apply the change twice
+        rt2.approve(rid)  # double-click is idempotent — does not apply twice
         st = await wait_for(store, rid, {"completed"})
         assert len(st["env"]["applied"]) == 1
     asyncio.run(go())
@@ -146,9 +144,9 @@ def test_pause_and_resume(tmp_path):
         rid = rt.create_run("upstream-oom")["run_id"]
         await asyncio.sleep(0.02)
         rt.pause(rid)
-        st = await wait_for(store, rid, {"paused"})
+        await wait_for(store, rid, {"paused"})
         rt.resume(rid)
-        await wait_for(store, rid, {"awaiting_approval"})
+        st = await wait_for(store, rid, {"awaiting_approval"})
         assert st["step"] >= 1
     asyncio.run(go())
 

@@ -14,13 +14,12 @@ Orchestration
 """
 from __future__ import annotations
 
-from typing import cast
-
 import asyncio
 import json
 import logging
 import threading
 import time
+from typing import cast
 
 from langgraph.types import Command
 from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
@@ -251,17 +250,24 @@ class Runtime:
 
         Argument validation happens here so the HTTP API can 422 before the
         graph runs. The gate node performs the idempotent production apply.
+        Idempotent when the gate was already claimed (double-click / retry).
         """
+        from .store import CheckpointConflict
+
         with self._gate_lock(run_id):
             st = self.get(run_id)
             p = st.get("pending")
+            # Already claimed — treat as success so clients can safely retry.
+            if p and p.get("kind") == "approval" and (p.get("submitted") or run_id in self._pending_resume):
+                if run_id not in self._pending_resume and not self.is_active(run_id):
+                    # Submitted flag stuck without a resume payload — relaunch.
+                    self._launch(run_id)
+                return
             can_finish = (
                 (st["status"] == "awaiting_approval" and p and p.get("kind") == "approval")
                 or (p and p.get("kind") == "approval" and p.get("executing"))
             )
-            if not can_finish or (p and p.get("submitted")):
-                raise RunStateError(f"Run is {st['status']}; nothing is waiting for approval")
-            if run_id in self._pending_resume:
+            if not can_finish:
                 raise RunStateError(f"Run is {st['status']}; nothing is waiting for approval")
             assert p is not None  # narrowed by can_finish
             spec = TOOLS[p["tool"]]
@@ -270,9 +276,16 @@ class Runtime:
                 spec.parse({**base_args, **(edited_args or {})})
             except ToolArgsError as e:
                 raise InvalidInput(f"Edited arguments are invalid: {e}") from None
-            # Claim the gate immediately so a double-click 409s before the graph resumes.
+            # Claim the gate immediately so a double-click is idempotent above.
             p["submitted"] = True
-            self.store.save(st)
+            try:
+                self.store.save(st)
+            except CheckpointConflict:
+                st = self.get(run_id)
+                p = st.get("pending") or p
+                p["submitted"] = True
+                st["pending"] = p
+                self.store.save(st)
             self._pending_resume[run_id] = {
                 "decision": "approved",
                 "args": edited_args,
