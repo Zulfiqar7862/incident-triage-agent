@@ -1,6 +1,6 @@
 # Operator walkthrough
 
-End-to-end tour of the React operator console against the **offline deterministic provider** (no API key). Recording: [`screenshots/walkthrough.mp4`](screenshots/walkthrough.mp4). Recreate with:
+End-to-end tour of the React operator console in **demo mode** (no API key required). Recording: [`screenshots/walkthrough.mp4`](screenshots/walkthrough.mp4). Recreate with:
 
 ```bash
 make frontend
@@ -17,13 +17,13 @@ make frontend
 1. **Empty console** — operator name set; scenario selected; no active run.
    ![Empty](screenshots/01-empty.png)
 
-2. **Running / thinking** — live SSE timeline, step rail, thinking indicator, tool cards.
+2. **Running / thinking** — live timeline in plain English, progress steps, “Agent is thinking…” rows, readable tool cards.
    ![Running](screenshots/02-running.png)
 
-3. **Approval gate** — confidence meter, args editor with diff, Approve (`A`) / Reject (`R`).
+3. **Approval gate** — plain-English proposed fix (“Roll back … to version …”), confidence as a percent, Approve fix / Reject.
    ![Approval](screenshots/approval-gate.png)
 
-4. **Resolved** — outcome card, token/cost counters, audit trail for the approved write.
+4. **Resolved** — outcome card and incident report; tokens/cost stay under **For engineers**.
    ![Resolved](screenshots/resolved.png)
 
 5. **Dark mode & mobile** — theme toggle; responsive layout under ~720px.
@@ -36,6 +36,6 @@ make frontend
 ## What to watch for in the MP4
 
 - Scenario start navigates to `/#/runs/<id>`
-- Streaming tool cards expand into readable fields, tables, and badges (raw data stays behind Technical details)
-- Approval card blocks the write until Approve
+- Streaming tool cards use plain sentences (no `tool_name(...)` text); expand into fields, tables, and badges (raw data stays behind Technical details / For engineers)
+- Approval card blocks the write until Approve fix
 - Post-approve continuation finishes with a resolved outcome

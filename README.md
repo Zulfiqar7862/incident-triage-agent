@@ -216,7 +216,7 @@ docs/                HARDENING, E2E_RESULTS, DEMO walkthrough, screenshots
 | Error recovery / budgets | Retries, identical-call caps, token/cost budgets |
 | Human-in-the-loop | Durable approval interrupt + audit (`X-Operator`) |
 | Resumable state | LangGraph checkpointer + Store CAS |
-| Live operator UX | React console with structured tool/result cards (no raw JSON by default), friendly error banners, SSE timeline, approval card, pause/resume/cancel |
+| Live operator UX | Plain-English React console: tool actions as sentences (not `tool(...)` calls), structured cards (no raw JSON by default), friendly errors, SSE timeline, approval card, Pause / Resume / Stop |
 | Observability | structlog, Prometheus, OTel GenAI, optional Langfuse |
 | Reproducible CI | Scripted offline provider, evals, frontend Vitest, Playwright UI |
 

@@ -72,9 +72,16 @@ def main() -> int:
             page.wait_for_timeout(400)
             # Main timeline/run view must not show pretty-printed JSON objects by default
             body = page.locator('[data-testid="timeline"]').inner_text()
+            side = page.locator('[aria-label="Run controls and state"]').inner_text()
             # Allow single-line values; forbid multi-line brace blocks typical of JSON dumps
             if re.search(r"\{\s*\n\s*\"", body):
                 raise RuntimeError("raw JSON object visible in main timeline")
+            # No function-call style text in the default operator view
+            combined = body + "\n" + side
+            if re.search(r"\b\w+_\w+\(", combined):
+                raise RuntimeError(f"function-call text visible in UI: {re.search(r'\b\w+_\w+\(', combined).group(0)}")
+            if re.search(r"\brun-[a-z0-9]+\b", combined, re.I):
+                raise RuntimeError("raw run id visible in default UI")
             # Collapsed technical details should not be open
             assert page.locator('[data-testid="technical-details"]:visible').count() == 0
             page.click("#apOk")
