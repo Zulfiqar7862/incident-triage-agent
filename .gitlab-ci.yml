@@ -1,4 +1,4 @@
-# GitLab CI: mirrors .github/workflows/ci.yml (lint, tests, scripted evals, docker build)
+# GitLab CI: mirrors .github/workflows/ci.yml
 stages: [test, build]
 
 variables:
@@ -16,6 +16,26 @@ test:
     - mypy -p app
     - pytest -q
     - TOOL_BACKOFF_S=0.01 python -m evals.run_evals --provider scripted
+    - apt-get update && apt-get install -y --no-install-recommends curl ca-certificates
+    - curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+    - apt-get install -y nodejs
+    - cd frontend && npm ci && npm run build && cd ..
+    - playwright install --with-deps chromium
+    - TOOL_BACKOFF_S=0.01 SCRIPTED_DELAY_S=0.12 python -m scripts.e2e_ui
+
+frontend:
+  stage: test
+  image: node:22-alpine
+  cache:
+    key: npm-$CI_COMMIT_REF_SLUG
+    paths: [frontend/node_modules]
+  script:
+    - cd frontend
+    - npm ci
+    - npm run lint
+    - npm run typecheck
+    - npm test
+    - npm run build
 
 docker:
   stage: build
@@ -23,6 +43,6 @@ docker:
   services: [docker:27-dind]
   variables:
     DOCKER_TLS_CERTDIR: "/certs"
-  needs: [test]
+  needs: [test, frontend]
   script:
     - docker build -t incident-agent .
