@@ -8,6 +8,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+import re
 
 import httpx
 from playwright.sync_api import sync_playwright
@@ -66,9 +67,16 @@ def main() -> int:
             page.wait_for_selector('[data-testid="thinking-indicator"], [data-testid="approval-card"]', timeout=90000)
             page.wait_for_selector('[data-testid="approval-card"]', timeout=120000)
             page.wait_for_selector('[data-testid="tool-card"]', timeout=30000)
-            # expand a tool card
+            # expand a tool card — structured view, no raw JSON dump
             page.locator('[data-testid="tool-card"] button').first.click()
-            page.wait_for_timeout(300)
+            page.wait_for_timeout(400)
+            # Main timeline/run view must not show pretty-printed JSON objects by default
+            body = page.locator('[data-testid="timeline"]').inner_text()
+            # Allow single-line values; forbid multi-line brace blocks typical of JSON dumps
+            if re.search(r"\{\s*\n\s*\"", body):
+                raise RuntimeError("raw JSON object visible in main timeline")
+            # Collapsed technical details should not be open
+            assert page.locator('[data-testid="technical-details"]:visible').count() == 0
             page.click("#apOk")
             page.wait_for_selector(".outcome", timeout=90000)
             browser.close()

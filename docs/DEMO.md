@@ -36,6 +36,6 @@ make frontend
 ## What to watch for in the MP4
 
 - Scenario start navigates to `/#/runs/<id>`
-- Streaming tool cards expand with syntax-highlighted args/output
+- Streaming tool cards expand into readable fields, tables, and badges (raw data stays behind Technical details)
 - Approval card blocks the write until Approve
 - Post-approve continuation finishes with a resolved outcome

@@ -42,7 +42,7 @@ flowchart TD
 
 | Layer | Choice |
 |---|---|
-| Frontend | Vite, React 19, TypeScript, TanStack Query, Zustand, React Router (hash), Tailwind CSS v4, Radix primitives, sonner, lucide-react, react-syntax-highlighter |
+| Frontend | Vite, React 19, TypeScript, TanStack Query, Zustand, React Router (hash), Tailwind CSS v4, Radix primitives, sonner, lucide-react |
 | Backend | FastAPI, LangGraph, SQLAlchemy 2 + Alembic, structlog, Prometheus `/metrics`, OpenTelemetry GenAI spans |
 | LLM | Gemini (default), Anthropic, OpenAI, or offline deterministic provider for CI / local development |
 | Serving | FastAPI mounts `frontend/dist` at `/` in production; Vite proxies `/api` (+ SSE) in development |
@@ -216,7 +216,7 @@ docs/                HARDENING, E2E_RESULTS, DEMO walkthrough, screenshots
 | Error recovery / budgets | Retries, identical-call caps, token/cost budgets |
 | Human-in-the-loop | Durable approval interrupt + audit (`X-Operator`) |
 | Resumable state | LangGraph checkpointer + Store CAS |
-| Live operator UX | React console, SSE timeline, approval card, pause/resume/cancel |
+| Live operator UX | React console with structured tool/result cards (no raw JSON by default), friendly error banners, SSE timeline, approval card, pause/resume/cancel |
 | Observability | structlog, Prometheus, OTel GenAI, optional Langfuse |
 | Reproducible CI | Scripted offline provider, evals, frontend Vitest, Playwright UI |
 
