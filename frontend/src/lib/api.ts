@@ -62,9 +62,23 @@ async function api<T>(path: string, opts: RequestInit = {}, retried = false): Pr
   }
   const j = await r.json().catch(() => ({}))
   if (!r.ok) {
-    const detail = typeof (j as { detail?: unknown }).detail === 'string'
-      ? (j as { detail: string }).detail
-      : `${r.status} ${r.statusText}`
+    const raw = (j as { detail?: unknown }).detail
+    let detail: string
+    if (typeof raw === 'string') detail = raw
+    else if (Array.isArray(raw)) {
+      detail = raw
+        .map((item) => {
+          if (item && typeof item === 'object' && 'msg' in item) {
+            const loc = Array.isArray((item as { loc?: unknown }).loc)
+              ? ((item as { loc: unknown[] }).loc).filter((x) => x !== 'body').join('.')
+              : ''
+            return loc ? `${loc}: ${(item as { msg: string }).msg}` : (item as { msg: string }).msg
+          }
+          return String(item)
+        })
+        .join('; ')
+    } else if (raw != null) detail = String(raw)
+    else detail = `${r.status} ${r.statusText}`
     throw new ApiError(r.status, detail)
   }
   return j as T

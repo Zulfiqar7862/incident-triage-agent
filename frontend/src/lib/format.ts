@@ -4,7 +4,11 @@ export const money = (n: number) => `$${(n || 0).toFixed(4)}`
 
 export function argStr(a: Record<string, unknown> | undefined): string {
   return Object.entries(a || {})
-    .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`)
+    .map(([k, v]) => {
+      if (v == null) return `${k}=—`
+      if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return `${k}=${v}`
+      return `${k}=…`
+    })
     .join(', ')
 }
 
@@ -23,6 +27,7 @@ export function formatElapsed(seconds: number): string {
   return m > 0 ? `${m}m ${r.toString().padStart(2, '0')}s` : `${r}s`
 }
 
+/** For clipboard / technical disclosure only — never render in the default UI. */
 export function prettyJson(v: unknown): string {
   try {
     return JSON.stringify(v, null, 2)
