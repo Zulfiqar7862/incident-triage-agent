@@ -5,3 +5,11 @@ __pycache__/
 data/
 evals/results/
 .pytest_cache/
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+.mypy_cache/
+.ruff_cache/
+.deepeval/
+docs/screenshots/_video/
+*.webm

@@ -29,7 +29,9 @@ from .runtime import InvalidInput, NotFound, RunStateError, Runtime, TooBusy
 from .store import CheckpointConflict, Store
 from .tools import tool_schemas
 
-STATIC = Path(__file__).resolve().parent.parent / "static"
+ROOT = Path(__file__).resolve().parent.parent
+FRONTEND_DIST = ROOT / "frontend" / "dist"
+STATIC = ROOT / "static"  # legacy fallback if frontend/dist missing
 log = logging.getLogger("api")
 
 
@@ -137,9 +139,9 @@ def create_app(settings: Settings | None = None, llm=None) -> FastAPI:
         response.headers.setdefault(
             "Content-Security-Policy",
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline'; "
-            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-            "font-src 'self' https://fonts.gstatic.com; "
+            "script-src 'self'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "font-src 'self' data:; "
             "img-src 'self' data:; "
             "connect-src 'self'; "
             "frame-ancestors 'none'",
@@ -148,7 +150,10 @@ def create_app(settings: Settings | None = None, llm=None) -> FastAPI:
             response.headers.setdefault("Cache-Control", "no-store")
         return response
 
-    # Serve CSS/JS modules next to index.html (no build step).
+    # Prefer Vite production build; fall back to legacy static/ during migration.
+    assets_dir = FRONTEND_DIST / "assets" if (FRONTEND_DIST / "assets").is_dir() else None
+    if assets_dir is not None:
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
     if STATIC.is_dir():
         app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
@@ -166,7 +171,16 @@ def create_app(settings: Settings | None = None, llm=None) -> FastAPI:
     # ---- UI, health, metrics (unauthenticated: no run data) ---------------------------------
     @app.get("/", include_in_schema=False)
     def index():
-        return FileResponse(STATIC / "index.html")
+        dist_index = FRONTEND_DIST / "index.html"
+        if dist_index.is_file():
+            return FileResponse(dist_index)
+        legacy = STATIC / "index.html"
+        if legacy.is_file():
+            return FileResponse(legacy)
+        return JSONResponse(
+            {"detail": "Frontend not built. Run: cd frontend && npm ci && npm run build"},
+            status_code=503,
+        )
 
     @app.get("/healthz")
     def healthz():
