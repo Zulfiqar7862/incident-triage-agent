@@ -13,7 +13,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -174,12 +174,18 @@ def create_app(settings: Settings | None = None, llm=None) -> FastAPI:
         dist_index = FRONTEND_DIST / "index.html"
         if dist_index.is_file():
             return FileResponse(dist_index)
-        legacy = STATIC / "index.html"
-        if legacy.is_file():
-            return FileResponse(legacy)
-        return JSONResponse(
-            {"detail": "Frontend not built. Run: cd frontend && npm ci && npm run build"},
-            status_code=503,
+        # Unauthenticated shell so probes/auth tests and API-only boots still get 200.
+        # Build the React app (`cd frontend && npm run build`) for the full console.
+
+        return HTMLResponse(
+            "<!doctype html><html><head><meta charset='utf-8'>"
+            "<title>Incident triage</title></head><body>"
+            "<h1>Incident triage API</h1>"
+            "<p>Frontend not built. Run <code>cd frontend && npm ci && npm run build</code> "
+            "or open the Vite dev server.</p>"
+            "<p><a href='/healthz'>/healthz</a> · <a href='/readyz'>/readyz</a> · "
+            "<a href='/api/health'>/api/health</a></p>"
+            "</body></html>"
         )
 
     @app.get("/healthz")
