@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 import os
+import re
 import signal
 import subprocess
 import sys
 import tempfile
 import time
 from pathlib import Path
-import re
 
 import httpx
 from playwright.sync_api import sync_playwright
