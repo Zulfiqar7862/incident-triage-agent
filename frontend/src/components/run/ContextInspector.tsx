@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { fetchContext } from '@/lib/api'
 import { mapError } from '@/lib/errors'
 import { num } from '@/lib/format'
+import { describeTool, titleCaseWords } from '@/lib/humanize'
 
 export function ContextInspector({
   runId,
@@ -29,7 +30,7 @@ export function ContextInspector({
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/55 backdrop-blur-[2px]" />
         <Dialog.Content className="fixed left-1/2 top-1/2 z-50 flex max-h-[88vh] w-[min(920px,94vw)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-[14px] border border-[var(--color-border)] bg-[var(--color-elevated)] shadow-xl">
           <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] px-4 py-3.5">
-            <Dialog.Title className="m-0 text-[15px] font-semibold">What the model sees on its next step</Dialog.Title>
+            <Dialog.Title className="m-0 text-[15px] font-semibold">Context inspector (for engineers)</Dialog.Title>
             <Dialog.Close asChild>
               <Button>Close</Button>
             </Dialog.Close>
@@ -40,8 +41,8 @@ export function ContextInspector({
             {q.data ? (
               <>
                 <p className="mt-0 text-xs text-[var(--color-fg-secondary)]">
-                  Rebuilt from the latest checkpoint. About {num(q.data.stats.total_tokens)} of{' '}
-                  {num(q.data.stats.budget)} tokens.
+                  Snapshot of what the assistant will see next. Context size:{' '}
+                  {num(q.data.stats.total_tokens)} / {num(q.data.stats.budget)}.
                 </p>
                 <div className="mb-4">
                   <div className="mb-1 text-xs font-semibold text-[var(--color-fg-secondary)]">System prompt</div>
@@ -53,10 +54,10 @@ export function ContextInspector({
                   const role = String(m.role || '')
                   const label =
                     role === 'tool'
-                      ? `Tool result: ${String(m.name || '')}`
+                      ? `Result: ${titleCaseWords(String(m.name || ''))}`
                       : role === 'assistant'
-                        ? 'Agent'
-                        : 'User'
+                        ? 'Assistant'
+                        : 'You'
                   return (
                     <div key={i} className="mb-4">
                       <div className="mb-1.5 text-xs font-semibold text-[var(--color-fg-secondary)]">{label}</div>
@@ -67,7 +68,9 @@ export function ContextInspector({
                             <div className="space-y-2">
                               {(m.tool_calls as Array<{ name: string; args: unknown }>).map((t, j) => (
                                 <div key={j}>
-                                  <div className="text-xs font-medium text-[var(--color-fg-secondary)]">{String(t.name)}</div>
+                                  <div className="text-xs font-medium text-[var(--color-fg-secondary)]">
+                                    {describeTool(String(t.name), (t.args as Record<string, unknown>) || {})}
+                                  </div>
                                   <DataView data={t.args} compact />
                                 </div>
                               ))}

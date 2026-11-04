@@ -8,10 +8,12 @@ type UiState = {
   theme: Theme
   sseDisconnected: boolean
   thinkingPhase: string | null
+  showEngineerDetails: boolean
   setOperator: (name: string) => void
   setTheme: (t: Theme) => void
   setSseDisconnected: (v: boolean) => void
   setThinkingPhase: (p: string | null) => void
+  setShowEngineerDetails: (v: boolean) => void
 }
 
 function applyTheme(theme: Theme) {
@@ -39,6 +41,7 @@ export const useUiStore = create<UiState>((set) => ({
   theme: savedTheme,
   sseDisconnected: false,
   thinkingPhase: null,
+  showEngineerDetails: false,
   setOperator: (name) => {
     persistOperator(name)
     set({ operator: name })
@@ -54,4 +57,5 @@ export const useUiStore = create<UiState>((set) => ({
   },
   setSseDisconnected: (sseDisconnected) => set({ sseDisconnected }),
   setThinkingPhase: (thinkingPhase) => set({ thinkingPhase }),
+  setShowEngineerDetails: (showEngineerDetails) => set({ showEngineerDetails }),
 }))

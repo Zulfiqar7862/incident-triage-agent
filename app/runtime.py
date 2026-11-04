@@ -331,8 +331,6 @@ class Runtime:
 
     def _publish_gate_if_needed(self, run_id: str) -> None:
         """Flip Store status to awaiting_* only after the interrupt is checkpointed."""
-        from .context import brief_args
-
         st = self.get(run_id)
         p = st.get("pending")
         if not p or st["status"] in ("awaiting_approval", "awaiting_input"):
@@ -342,7 +340,7 @@ class Runtime:
             self._set_status(
                 st,
                 "awaiting_approval",
-                f"Approve, edit, or reject {p['tool']}({brief_args(p['args'])}).",
+                "Waiting for you to approve a production change.",
             )
         elif p.get("kind") == "input":
             self._emit(st, "input.requested", p)

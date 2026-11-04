@@ -52,10 +52,10 @@ export function AppHeader() {
           }`}
         />
         {health.isError
-          ? 'API unreachable'
+          ? 'Can’t reach the server'
           : offline
-            ? 'Offline deterministic provider — set an API key for a live model'
-            : `Model: ${health.data?.llm.model || '…'}`}
+            ? 'Demo mode (offline)'
+            : 'Live assistant'}
       </span>
       <span className="min-w-2 flex-1" />
       <div className="header-actions flex flex-wrap items-center gap-2">

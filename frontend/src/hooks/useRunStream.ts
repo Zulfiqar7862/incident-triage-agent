@@ -48,21 +48,24 @@ function phaseFromEvent(ev: AgentEvent): string | null {
     case 'memory.recalled':
       return 'Recalling past incidents…'
     case 'llm.call':
-      return 'Thinking with the model…'
+      return 'Agent is thinking…'
     case 'llm.retry':
-      return 'Retrying model call…'
+      return 'Trying again…'
     case 'agent.message':
-      return 'Updating plan…'
-    case 'tool.call':
-      return `Calling ${(ev.payload.name as string) || 'tool'}…`
+      return 'Updating the plan…'
+    case 'tool.call': {
+      const name = String(ev.payload.name || '')
+      if (name === 'update_working_memory') return 'Agent is thinking…'
+      return 'Gathering evidence…'
+    }
     case 'tool.result':
-      return 'Reading tool output…'
+      return 'Reading results…'
     case 'memory.update':
-      return 'Updating working memory…'
+      return 'Agent is thinking…'
     case 'approval.requested':
-      return 'Waiting for approval…'
+      return 'Waiting for your approval…'
     case 'input.requested':
-      return 'Waiting for input…'
+      return 'Waiting for your answer…'
     case 'run.finished':
       return null
     default:

@@ -1,5 +1,5 @@
 import { formatElapsed, money, num } from '@/lib/format'
-import { humanizeKey } from '@/lib/errors'
+import { describeTool, titleCaseWords } from '@/lib/humanize'
 
 export function formatScalar(value: unknown, keyHint?: string): string {
   if (value == null) return '—'
@@ -40,8 +40,9 @@ export function parseMaybeJson(raw: string): unknown {
   return raw
 }
 
+/** @deprecated Prefer describeTool / toolNoun from humanize */
 export function humanToolName(name: string): string {
-  return humanizeKey(name)
+  return describeTool(name) || titleCaseWords(name)
 }
 
 export function statusTone(s: string): 'ok' | 'warn' | 'danger' | 'accent' | 'neutral' {

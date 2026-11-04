@@ -3,9 +3,8 @@ import { useState } from 'react'
 import { toast } from 'sonner'
 import { TechnicalDetails } from '@/components/common/DataView'
 import { ToolArgsView, ToolOutputView } from '@/components/common/ToolOutputView'
-import { humanToolName } from '@/lib/dataDisplay'
+import { describeTool } from '@/lib/humanize'
 import { Button } from '@/components/ui/button'
-import { humanizeKey } from '@/lib/errors'
 import { cn } from '@/lib/utils'
 
 export type ToolCardModel = {
@@ -21,19 +20,11 @@ export type ToolCardModel = {
   truncated?: { omitted_chars?: number }
 }
 
-function summaryArgs(args: Record<string, unknown>): string {
-  const prefer = ['service', 'metric', 'query', 'to_version', 'window_minutes']
-  const parts: string[] = []
-  for (const k of prefer) {
-    if (args[k] != null && args[k] !== '') parts.push(`${humanizeKey(k)}: ${String(args[k])}`)
-  }
-  if (!parts.length) {
-    for (const [k, v] of Object.entries(args).slice(0, 3)) {
-      if (typeof v === 'object') continue
-      parts.push(`${humanizeKey(k)}: ${String(v)}`)
-    }
-  }
-  return parts.join(' · ')
+function statusTag(tool: ToolCardModel): string {
+  if (tool.status === 'running') return 'In progress'
+  if (tool.status === 'waiting') return 'Waiting for you'
+  if (tool.status === 'error') return 'Couldn’t finish'
+  return 'Done'
 }
 
 export function ToolCard({ tool }: { tool: ToolCardModel }) {
@@ -50,14 +41,8 @@ export function ToolCard({ tool }: { tool: ToolCardModel }) {
       <Check className="size-3.5 text-[var(--color-success)]" />
     )
 
-  const tag =
-    tool.status === 'running'
-      ? 'Running'
-      : tool.status === 'waiting'
-        ? 'Waiting for you'
-        : tool.status === 'error'
-          ? `Error${tool.duration_ms != null ? ` · ${tool.duration_ms} ms` : ''}`
-          : `Done${tool.duration_ms != null ? ` · ${tool.duration_ms} ms` : ''}${tool.attempts && tool.attempts > 1 ? ` · ${tool.attempts} tries` : ''}`
+  const tag = statusTag(tool)
+  const title = describeTool(tool.name, tool.args)
 
   const copy = async (text: string, label: string) => {
     try {
@@ -84,9 +69,8 @@ export function ToolCard({ tool }: { tool: ToolCardModel }) {
         aria-expanded={open}
       >
         {statusIcon}
-        <span className="font-semibold tracking-tight">{humanToolName(tool.name)}</span>
-        <span className="min-w-0 flex-1 truncate text-[12.5px] text-[var(--color-fg-tertiary)]" title={summaryArgs(tool.args)}>
-          {summaryArgs(tool.args)}
+        <span className="min-w-0 flex-1 truncate font-semibold tracking-tight" title={title}>
+          {title}
         </span>
         <span
           className={cn(
@@ -123,7 +107,7 @@ export function ToolCard({ tool }: { tool: ToolCardModel }) {
                 <span className="text-xs font-semibold uppercase tracking-wide text-[var(--color-fg-tertiary)]">
                   Result
                   {tool.truncated?.omitted_chars
-                    ? ` · ${tool.truncated.omitted_chars.toLocaleString()} chars trimmed for the model`
+                    ? ` · ${tool.truncated.omitted_chars.toLocaleString()} characters trimmed`
                     : ''}
                 </span>
                 <Button size="sm" variant="ghost" onClick={() => copy(tool.content || '', 'Result')}>

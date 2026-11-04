@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils'
+import { statusLabel } from '@/lib/humanize'
 import type { RunStatus } from '@/lib/types'
 
 const tone: Record<string, string> = {
@@ -32,13 +33,13 @@ export function StatusBadge({ status, className }: { status: RunStatus | string;
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1.5 text-xs font-semibold capitalize',
+        'inline-flex items-center gap-1.5 text-xs font-semibold',
         tone[s] || 'text-[var(--color-fg-secondary)]',
         className,
       )}
     >
       <span className={cn('inline-block size-1.5 rounded-full', dot[s] || 'bg-[var(--color-fg-tertiary)]')} />
-      {s.replaceAll('_', ' ')}
+      {statusLabel(s)}
     </span>
   )
 }

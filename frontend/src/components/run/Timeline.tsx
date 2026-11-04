@@ -2,8 +2,18 @@ import { ArrowDown } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { ToolCard, type ToolCardModel } from '@/components/run/ToolCard'
-import { money, num } from '@/lib/format'
+import { describeTool, humanizeEmbeddedCalls, toolNoun } from '@/lib/humanize'
 import type { AgentEvent } from '@/lib/types'
+
+const HIDDEN_TYPES = new Set([
+  'llm.call',
+  'gen_ai.span',
+  'memory.update',
+  'context.compacted',
+  'llm.retry',
+])
+
+const META_TOOLS = new Set(['update_working_memory'])
 
 function buildTools(events: AgentEvent[]): Map<string, ToolCardModel> {
   const map = new Map<string, ToolCardModel>()
@@ -19,7 +29,7 @@ function buildTools(events: AgentEvent[]): Map<string, ToolCardModel> {
       })
     } else if (ev.type === 'tool.retry') {
       const t = map.get(String(p.id))
-      if (t) t.retryNote = `Attempt ${p.attempt} failed: ${p.error}. Retrying in ${p.retry_in_s}s.`
+      if (t) t.retryNote = `That check failed — trying again shortly.`
     } else if (ev.type === 'tool.result') {
       const id = String(p.id)
       const existing =
@@ -48,19 +58,13 @@ function labelFor(ev: AgentEvent): string {
   const p = ev.payload || {}
   switch (ev.type) {
     case 'operator.message':
-      return `${p.actor || 'Operator'} said: “${p.text}”${p.queued ? ' (queued for next step)' : ''}`
+      return `${p.actor || 'You'} said: “${p.text}”${p.queued ? ' (will be read next)' : ''}`
     case 'operator.control':
-      return `Operator asked to ${p.action}`
-    case 'memory.update':
-      return `Updated working memory: ${((p.changed as string[]) || []).join(', ') || 'nothing'}`
+      return `You asked to ${String(p.action).replaceAll('_', ' ')}`
     case 'memory.saved':
-      return 'Saved a short summary to long-term memory'
-    case 'context.compacted':
-      return `Compacted ${p.dropped_groups} oldest step(s) to stay under ${num(p.budget as number)} tokens`
-    case 'llm.retry':
-      return `Model call failed (${p.error}). Retrying in ${p.retry_in_s}s.`
+      return 'Saved a short note for next time'
     default:
-      return ev.type
+      return humanizeEmbeddedCalls(String(ev.type))
   }
 }
 
@@ -68,41 +72,20 @@ function renderEvent(ev: AgentEvent): ReactNode {
   const p = ev.payload || {}
   switch (ev.type) {
     case 'run.created':
-      return (
-        <div className="text-[13px] text-[var(--color-fg-secondary)]">
-          Run started with <b className="text-[var(--color-fg)]">{String(p.model)}</b>
-        </div>
-      )
+      return <div className="text-[13px] text-[var(--color-fg-secondary)]">Investigation started</div>
     case 'memory.recalled':
       return (
         <div className="text-[13px] text-[var(--color-fg-secondary)]">
-          Recalled {(p.memories as unknown[])?.length || 0} past incident(s)
+          Looked up {(p.memories as unknown[])?.length || 0} similar past incident(s)
         </div>
       )
-    case 'run.status':
+    case 'run.status': {
+      const status = String(p.status).replaceAll('_', ' ')
+      const reason = p.reason ? humanizeEmbeddedCalls(String(p.reason)) : ''
       return (
         <div className="text-[13px] text-[var(--color-fg-secondary)]">
-          Status: <b className="text-[var(--color-fg)]">{String(p.status).replaceAll('_', ' ')}</b>
-          {p.reason ? `. ${String(p.reason)}` : ''}
-        </div>
-      )
-    case 'llm.call':
-    case 'gen_ai.span': {
-      const c = (p.context || {}) as Record<string, number>
-      return (
-        <div className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-elevated)] px-3.5 py-2.5 text-[13px] text-[var(--color-fg-secondary)]">
-          <div className="mb-1 text-xs font-semibold text-[var(--color-fg-tertiary)]">Model call</div>
-          <div className="flex flex-wrap gap-x-3.5 gap-y-1 text-[12.5px]">
-            <span>{num(p.input_tokens as number)} tokens in</span>
-            <span>{num(p.output_tokens as number)} out</span>
-            <span>{num(p.latency_ms as number)} ms</span>
-            <span>{money(p.cost_usd as number)}</span>
-            {c.total_tokens != null ? (
-              <span>
-                context {num(c.total_tokens)}/{num(c.budget)}
-              </span>
-            ) : null}
-          </div>
+          Status: <b className="text-[var(--color-fg)]">{status}</b>
+          {reason ? `. ${reason}` : ''}
         </div>
       )
     }
@@ -115,31 +98,37 @@ function renderEvent(ev: AgentEvent): ReactNode {
     case 'policy.blocked':
       return (
         <div className="rounded-r-[10px] border-l-4 border-[var(--color-danger)] bg-[var(--color-danger-soft)] px-3.5 py-2.5 text-[13px]">
-          Blocked <code>{String(p.tool)}</code>: confidence {String(p.confidence)} below{' '}
-          {String(p.min_confidence)}
+          Skipped {toolNoun(String(p.tool))}: confidence too low to change production safely.
         </div>
       )
-    case 'approval.requested':
+    case 'approval.requested': {
+      const tool = String(p.tool || '')
+      const args = (p.args as Record<string, unknown>) || {}
       return (
         <div className="rounded-r-[10px] border-l-4 border-[var(--color-warning)] bg-[var(--color-warning-soft)] px-3.5 py-3">
           <b>Waiting for your approval</b>
-          <br />
-          <code className="font-mono text-[12.5px]">{String(p.tool)}</code>
+          <p className="m-0 mt-1 text-[13px] leading-relaxed">{describeTool(tool, args)}</p>
         </div>
       )
-    case 'approval.decided':
+    }
+    case 'approval.decided': {
+      const tool = String(p.tool || '')
+      const args = (p.args as Record<string, unknown>) || {}
+      const decision = String(p.decision || '')
+      const verb = decision === 'approved' ? 'approved' : decision === 'rejected' ? 'rejected' : decision
       return (
         <div className="text-[13px] text-[var(--color-fg-secondary)]">
-          <b className="text-[var(--color-fg)]">{String(p.actor || 'Operator')}</b> {String(p.decision)}{' '}
-          {String(p.tool)}
-          {p.edited ? ' with edited arguments' : ''}
+          <b className="text-[var(--color-fg)]">{String(p.actor || 'You')}</b> {verb}{' '}
+          {describeTool(tool, args)}
+          {p.edited ? ' (with edits)' : ''}
           {p.feedback ? `: “${String(p.feedback)}”` : ''}
         </div>
       )
+    }
     case 'input.requested':
       return (
         <div className="rounded-r-[10px] border-l-4 border-[var(--color-warning)] bg-[var(--color-warning-soft)] px-3.5 py-3">
-          <b>The agent asks:</b> {String(p.question)}
+          <b>The assistant asks:</b> {String(p.question)}
         </div>
       )
     case 'run.finished': {
@@ -158,17 +147,10 @@ function renderEvent(ev: AgentEvent): ReactNode {
     }
     case 'operator.message':
     case 'operator.control':
-    case 'memory.update':
     case 'memory.saved':
-    case 'context.compacted':
-    case 'llm.retry':
       return <div className="text-[13px] text-[var(--color-fg-secondary)]">{labelFor(ev)}</div>
     default:
-      return (
-        <div className="text-[13px] text-[var(--color-fg-tertiary)]">
-          {ev.type.replaceAll('.', ' · ').replaceAll('_', ' ')}
-        </div>
-      )
+      return null
   }
 }
 
@@ -197,20 +179,53 @@ export function Timeline({ events }: { events: AgentEvent[] }) {
   const items: ReactNode[] = []
   let lastStep: number | null = null
   const seenTools = new Set<string>()
+  let thinkingOpen = false
+
+  const closeThinking = () => {
+    thinkingOpen = false
+  }
+
+  const pushThinking = (key: string) => {
+    if (thinkingOpen) return
+    thinkingOpen = true
+    items.push(
+      <div key={key} className="animate-in relative grid grid-cols-[48px_minmax(0,1fr)] gap-x-3">
+        <div className="absolute bottom-0 left-[23px] top-0 w-0.5 bg-[var(--color-border)]" />
+        <div className="relative z-[1] pt-3 pr-2 text-right text-[11px] font-semibold text-[var(--color-fg-tertiary)]" />
+        <div className="min-w-0 py-1 pb-2.5">
+          <div className="text-[13px] italic text-[var(--color-fg-tertiary)]">Agent is thinking…</div>
+        </div>
+      </div>,
+    )
+  }
 
   for (const ev of events) {
     const p = ev.payload || {}
+
+    if (HIDDEN_TYPES.has(ev.type)) {
+      pushThinking(`think-${ev.seq}`)
+      continue
+    }
+
+    if (ev.type === 'tool.call' && META_TOOLS.has(String(p.name || ''))) {
+      pushThinking(`think-meta-${ev.seq}`)
+      continue
+    }
+    if (ev.type === 'tool.result' && META_TOOLS.has(String(p.name || tools.get(String(p.id))?.name || ''))) {
+      continue
+    }
+
+    closeThinking()
+
     const step = typeof p.step === 'number' ? p.step : null
     const showStep = step != null && step !== lastStep
     if (showStep) lastStep = step
-    const gut = showStep ? (
-      <span className="rounded bg-[var(--color-bg)] py-0.5 pl-1">s{step}</span>
-    ) : null
+    const gut = showStep ? <span className="rounded bg-[var(--color-bg)] py-0.5 pl-1">{step}</span> : null
 
     const wrap = (inner: ReactNode, key: string) => (
       <div key={key} className="animate-in relative grid grid-cols-[48px_minmax(0,1fr)] gap-x-3">
         <div className="absolute bottom-0 left-[23px] top-0 w-0.5 bg-[var(--color-border)]" />
-        <div className="relative z-[1] pt-3 pr-2 text-right font-mono text-[11px] font-semibold text-[var(--color-fg-tertiary)]">
+        <div className="relative z-[1] pt-3 pr-2 text-right text-[11px] font-semibold text-[var(--color-fg-tertiary)]">
           {gut}
         </div>
         <div className="min-w-0 py-1 pb-2.5">{inner}</div>
@@ -227,7 +242,8 @@ export function Timeline({ events }: { events: AgentEvent[] }) {
       continue
     }
     if (ev.type === 'tool.result' || ev.type === 'tool.retry') continue
-    items.push(wrap(renderEvent(ev), `e${ev.seq}`))
+    const node = renderEvent(ev)
+    if (node) items.push(wrap(node, `e${ev.seq}`))
   }
 
   return (
