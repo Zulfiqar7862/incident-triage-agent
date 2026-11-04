@@ -6,6 +6,7 @@ UI use; the async SQLAlchemy engine is available for workers/jobs.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import threading
@@ -29,7 +30,9 @@ CREATE TABLE IF NOT EXISTS events (
     run_id TEXT NOT NULL,
     ts REAL NOT NULL,
     type TEXT NOT NULL,
-    payload TEXT NOT NULL
+    payload TEXT NOT NULL,
+    prev_hash TEXT NOT NULL DEFAULT '',
+    event_hash TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_events_run ON events(run_id, seq);
 CREATE TABLE IF NOT EXISTS inbox (
@@ -63,6 +66,12 @@ class Store:
         with self._lock:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.executescript(SCHEMA)
+            # Additive migration for DBs created before hash chaining.
+            cols = {r[1] for r in self._conn.execute("PRAGMA table_info(events)").fetchall()}
+            if "prev_hash" not in cols:
+                self._conn.execute("ALTER TABLE events ADD COLUMN prev_hash TEXT NOT NULL DEFAULT ''")
+            if "event_hash" not in cols:
+                self._conn.execute("ALTER TABLE events ADD COLUMN event_hash TEXT NOT NULL DEFAULT ''")
 
     def _exec(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
         with self._lock:
@@ -146,20 +155,75 @@ class Store:
         return [json.loads(r["state"]) for r in rows]
 
     # ---- event log ------------------------------------------------------------
+    @staticmethod
+    def _event_hash(prev_hash: str, run_id: str, ts: float, type_: str, payload_json: str) -> str:
+        blob = f"{prev_hash}|{run_id}|{ts:.6f}|{type_}|{payload_json}"
+        return hashlib.sha256(blob.encode()).hexdigest()
+
     def append_event(self, run_id: str, type_: str, payload: dict[str, Any]) -> dict:
+        """Append-only event write. No update/delete API exists for the events table.
+
+        Each row carries ``prev_hash`` + ``event_hash`` (SHA-256 chain per run).
+        This detects silent edits to the local DB; it is not a WORM/external
+        audit store and does not protect against someone with filesystem access
+        rewriting the whole file.
+        """
         ts = time.time()
-        cur = self._exec(
-            "INSERT INTO events (run_id, ts, type, payload) VALUES (?,?,?,?)",
-            (run_id, ts, type_, json.dumps(payload, default=str)),
-        )
-        return {"seq": cur.lastrowid, "run_id": run_id, "ts": ts, "type": type_, "payload": payload}
+        payload_json = json.dumps(payload, default=str, sort_keys=True)
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT event_hash FROM events WHERE run_id=? ORDER BY seq DESC LIMIT 1",
+                (run_id,),
+            ).fetchone()
+            prev_hash = row["event_hash"] if row and row["event_hash"] else ""
+            event_hash = self._event_hash(prev_hash, run_id, ts, type_, payload_json)
+            cur = self._conn.execute(
+                "INSERT INTO events (run_id, ts, type, payload, prev_hash, event_hash) VALUES (?,?,?,?,?,?)",
+                (run_id, ts, type_, payload_json, prev_hash, event_hash),
+            )
+            seq = cur.lastrowid
+        return {
+            "seq": seq,
+            "run_id": run_id,
+            "ts": ts,
+            "type": type_,
+            "payload": payload,
+            "prev_hash": prev_hash,
+            "event_hash": event_hash,
+        }
 
     def events_since(self, run_id: str, after: int = 0, limit: int = 500) -> list[dict]:
         rows = self._rows(
-            "SELECT seq, run_id, ts, type, payload FROM events WHERE run_id=? AND seq>? ORDER BY seq LIMIT ?",
+            "SELECT seq, run_id, ts, type, payload, prev_hash, event_hash "
+            "FROM events WHERE run_id=? AND seq>? ORDER BY seq LIMIT ?",
             (run_id, after, limit),
         )
-        return [{**dict(r), "payload": json.loads(r["payload"])} for r in rows]
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["payload"] = json.loads(r["payload"])
+            out.append(d)
+        return out
+
+    def verify_event_chain(self, run_id: str) -> dict[str, Any]:
+        """Recompute the hash chain for a run. Returns ok / first bad seq."""
+        rows = self._rows(
+            "SELECT seq, run_id, ts, type, payload, prev_hash, event_hash "
+            "FROM events WHERE run_id=? ORDER BY seq",
+            (run_id,),
+        )
+        prev = ""
+        for r in rows:
+            payload_json = r["payload"]  # already stored JSON text
+            # Re-canonicalize: payload was stored with sort_keys=True
+            expected_prev = prev
+            if (r["prev_hash"] or "") != expected_prev:
+                return {"ok": False, "seq": r["seq"], "reason": "prev_hash mismatch"}
+            expected = self._event_hash(expected_prev, r["run_id"], float(r["ts"]), r["type"], payload_json)
+            if (r["event_hash"] or "") != expected:
+                return {"ok": False, "seq": r["seq"], "reason": "event_hash mismatch"}
+            prev = r["event_hash"] or ""
+        return {"ok": True, "events": len(rows)}
 
     # ---- operator inbox (acked only after the step that consumed it is checkpointed)
     def push_inbox(self, run_id: str, text: str) -> None:

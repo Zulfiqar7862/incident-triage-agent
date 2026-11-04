@@ -1,6 +1,8 @@
-# Incident triage agent
+# Incident Triage Agent
 
-Production-ready operator console for autonomous incident investigation. Paste a production alert (or start a curated scenario): the agent plans an investigation, calls tools (metrics, logs, deploys, runbooks), maintains structured working memory, and proposes a fix. **Every production mutation stops at a durable human approval gate** with a confidence score — low confidence is bounced back to the agent instead of paging a person. Operators watch the live reasoning trace over SSE, can edit / reject / redirect, and can resume after a crash from the last checkpoint.
+A governed production agent for live incident response — not a chatbot wrapper.
+
+The agent plans an investigation, calls tools (metrics, logs, deploys, runbooks), recovers from tool and model failures, and **stops at a human approval gate before any production mutation**. Run state and context are checkpointed so work resumes after a crash. Operators watch the live reasoning trace over SSE, intervene with messages or edits, and approve or reject proposed changes. The backend exposes a FastAPI runtime for runs, tools, durable state, metrics, and the event stream.
 
 ![Empty console](docs/screenshots/01-empty.png)
 
@@ -236,13 +238,36 @@ docs/                HARDENING, E2E_RESULTS, DEMO walkthrough, screenshots
 
 ---
 
+
+## Governance and audit
+
+This agent is built as a **governed production agent**: risky changes stop for a human, every step is recorded, and operators can resume or kill a run after interruption.
+
+1. **Approval before risky / destructive actions (human-in-the-loop).** Mutating tools (`rollback_deploy`, `restart_service`) always interrupt for operator approve / reject / edit. The pending payload includes tool args, the agent's reasoning (`reason`), a confidence score (0–1), and additive UI fields `title` / `summary` / `risk` (`high` for writes). Proposals below `min_write_confidence` are blocked by policy without paging an operator. There are **no autonomous production mutations** — writes cannot apply without an explicit approve.
+2. **Audit trail.** Agent steps, tool calls/results, policy blocks, approval requests/decisions, and operator identity (`X-Operator`) are appended to the run event log and checkpoints. Query via `GET /api/runs/{run_id}`, `GET /api/runs/{run_id}/events`, and `GET /api/runs/{run_id}/stream` (SSE). Verify the per-run hash chain with `GET /api/runs/{run_id}/events/verify`.
+3. **Policy and tool gates.**
+
+   | Without approval (read) | Require approval (write) | Other |
+   | --- | --- | --- |
+   | `get_alert`, `list_services`, `describe_service`, `query_metrics`, `search_logs`, `search_runbooks`, `get_recent_deploys` | `rollback_deploy`, `restart_service` | `ask_operator` pauses for input; `update_working_memory` / `finish` are meta (no production change) |
+
+   Limits: `max_steps`, `max_concurrent_runs`, `max_run_tokens`, `max_run_cost_usd`, `min_write_confidence`. Soft stop → `needs_attention` (resume raises ceilings). Set `BUDGET_HARD_STOP=true` to **cancel** instead when a budget is exhausted.
+4. **Least-privilege credentials.** Tools run against a **simulated platform** (`MockCluster`); the runtime holds **no production cluster credentials or cloud scopes**. LLM provider keys (if used) are env-only. Live adapters are on the Roadmap and must bring scoped credentials.
+5. **Blast radius / scope containment.** One alert/scenario per run. Write tool `service` args are validated against that scenario's service registry before an approval is opened (unknown services → `policy.blocked`). Args are Pydantic-validated. Only two write tools exist. Confidence floor + mandatory approval + step/token/cost budgets bound runaway loops. Gaps: no cross-run service allowlist beyond the scenario JSON; a wrong-but-known service in-scenario can still be proposed (human must reject); no multi-tenant isolation.
+6. **Kill switch / emergency stop.** Per-run: `POST /api/runs/{run_id}/pause` (stops at the next prepare step boundary) and `POST /api/runs/{run_id}/cancel` (sets a cancel flag and cancels the in-flight asyncio task so a long LLM/tool await does not keep burning tokens; does not undo an already-applied mutation). Fleet-wide: `POST /api/emergency-stop` cancels every non-terminal run. Pause/cancel are cooperative around LangGraph interrupts; there is no hypervisor-level preemption of a tool already mutating the simulator.
+7. **Resume after restart.** LangGraph checkpointer + Store CAS; interrupted / mid-approval runs resume via `POST /api/runs/{run_id}/resume`; approve apply is idempotent by tool-call id.
+8. **Tamper-evident audit storage.** Events live in the local SQLite (or configured DB) `events` table. The Store exposes **append-only** APIs (no update/delete). Each row carries `prev_hash` + `event_hash` (SHA-256 chain per run) for silent-edit detection via `/events/verify`. This is **not** cryptographic WORM: anyone with filesystem/DB admin access can rewrite the file. Hash-chaining + external WORM/export remain partial — see Roadmap.
+9. **Observability.** `GET /metrics` (Prometheus), OpenTelemetry GenAI spans, structlog, optional Langfuse; per-run token and cost in run usage and the event stream.
+
 ## Known limitations
 
 - Dual persistence (Store + LangGraph checkpointer) must stay aligned; CAS conflicts surface as HTTP 409.
 - In-process concurrency cap — not distributed leases.
 - Shared bearer token + self-declared `X-Operator` (fine for a console; not multi-tenant IAM).
 - Event log / checkpoint growth — budgets bound local runs; production needs retention.
-- Simulated cluster tools — not a live Kubernetes control plane.
+- Simulated cluster tools — not a live Kubernetes control plane; no production credentials are held.
+- Event hash chain is tamper-evident, not tamper-proof (local DB rewrite possible).
+- Cancel interrupts the drive task; it does not reverse a mutation that already applied.
 
 See also [`docs/HARDENING.md`](docs/HARDENING.md).
 
@@ -252,12 +277,14 @@ See also [`docs/HARDENING.md`](docs/HARDENING.md).
 
 - Path-based SPA routing behind the reverse proxy
 - Shared run leases for multi-worker / multi-replica
-- Event retention / archival policy
+- Event retention / archival policy and **WORM / signed export** of the audit hash chain
 - Stronger operator identity (OIDC) instead of self-declared names
-- Live cluster adapters behind the same tool schemas
+- Live cluster adapters behind the same tool schemas, with **least-privilege scoped credentials**
+- Optional immediate preemption of in-flight tool handlers (beyond asyncio task cancel)
+- Cross-scenario / org-level service allowlists for stronger blast-radius isolation
 
 ---
 
 ## License
 
-See repository for terms. Built as a Senior Software Engineer – AI take-home for Intuitive Technology Partners.
+See repository for terms.

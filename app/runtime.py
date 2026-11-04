@@ -35,7 +35,7 @@ from .memory import make_memory
 from .mock_env import MockCluster, ToolError, ToolTransientError, load_scenario
 from .observability.tracing import span as otel_span
 from .store import Store
-from .tools import TOOLS, ToolArgsError, ToolSpec, tool_schemas
+from .tools import TOOLS, ToolArgsError, ToolSpec, enrich_pending, tool_schemas
 
 log = logging.getLogger("agent")
 
@@ -148,6 +148,8 @@ class Runtime:
         view = {k: v for k, v in st.items() if k not in ("history", "env")}
         view["active"] = self.is_active(st["run_id"])
         view["history_messages"] = len(st["history"])
+        if view.get("pending"):
+            view["pending"] = enrich_pending(view["pending"])
         if include_history:
             view["history"] = st["history"]
         return view
@@ -206,15 +208,41 @@ class Runtime:
         self._emit(st, "operator.control", {"action": "pause"})
 
     def cancel(self, run_id: str) -> None:
+        """Stop a run. Prefer step-boundary cancel via the prepare node; also cancel the
+        in-flight asyncio task so a long LLM/tool await does not keep burning tokens.
+        Does not roll back an already-applied production mutation.
+        """
         st = self.get(run_id)
         if st["status"] in TERMINAL:
             raise RunStateError(f"Run is already {st['status']}")
-        if self.is_active(run_id):
-            self._control[run_id] = "cancel"
-            self._emit(st, "operator.control", {"action": "cancel"})
+        self._control[run_id] = "cancel"
+        self._emit(st, "operator.control", {"action": "cancel"})
+        t = self._tasks.get(run_id)
+        if t is not None and not t.done():
+            t.cancel()
             return
+        # Idle (e.g. awaiting_approval / paused): flip immediately.
         st["pending"] = None
         self._set_status(st, "cancelled", "Cancelled by operator")
+
+    def emergency_stop(self) -> dict:
+        """Cancel every non-terminal run. Per-run kill switch applied fleet-wide."""
+        cancelled: list[str] = []
+        skipped: list[str] = []
+        for row in self.store.list_runs(limit=500):
+            rid = row["id"]
+            st = self.store.load(rid)
+            if not st:
+                continue
+            if st["status"] in TERMINAL:
+                skipped.append(rid)
+                continue
+            try:
+                self.cancel(rid)
+                cancelled.append(rid)
+            except RunStateError:
+                skipped.append(rid)
+        return {"cancelled": cancelled, "skipped": skipped}
 
     def resume(self, run_id: str) -> None:
         st = self.get(run_id)
@@ -336,14 +364,15 @@ class Runtime:
         if not p or st["status"] in ("awaiting_approval", "awaiting_input"):
             return
         if p.get("kind") == "approval":
-            self._emit(st, "approval.requested", p)
+            enriched = enrich_pending(p)
+            self._emit(st, "approval.requested", enriched)
             self._set_status(
                 st,
                 "awaiting_approval",
                 "Waiting for you to approve a production change.",
             )
         elif p.get("kind") == "input":
-            self._emit(st, "input.requested", p)
+            self._emit(st, "input.requested", enrich_pending(p))
             self._set_status(st, "awaiting_input", "The agent asked the operator a question.")
 
     def _launch(self, run_id: str) -> None:
@@ -403,7 +432,15 @@ class Runtime:
                         continue
                     return
         except asyncio.CancelledError:
-            raise  # process shutdown: recover() marks interrupted
+            # Operator cancel sets _control["cancel"] then cancels the task.
+            # Process shutdown cancels without that flag; recover() marks interrupted.
+            if self._control.pop(run_id, None) == "cancel":
+                cur = self.store.load(run_id)
+                if cur is not None and cur["status"] not in TERMINAL:
+                    cur["pending"] = None
+                    self._set_status(cur, "cancelled", "Cancelled by operator")
+                return
+            raise
         except Exception as e:  # noqa: BLE001
             log.exception("run %s failed", run_id)
             st = self.get(run_id)
@@ -496,16 +533,25 @@ class Runtime:
             args = spec.parse(c.args).model_dump()
         except ToolArgsError as e:
             return (f"Invalid arguments for {c.name}: {e}", True, {})
+        # Scope containment: service names must exist in this run's scenario registry.
+        if "service" in args:
+            try:
+                self._cluster(st)._svc(args["service"])
+            except ToolError as e:
+                self._emit(st, "policy.blocked", {"id": c.id, "tool": c.name, "reason": "unknown_service", "service": args.get("service")})
+                return (str(e), True, {})
         if spec.kind == "write":
             conf, floor = args["confidence"], self.settings.min_write_confidence
             if conf < floor:  # confidence-based routing: don't page a human for a guess
                 self._emit(st, "policy.blocked", {"id": c.id, "tool": c.name, "confidence": conf, "min_confidence": floor})
                 return (f"Blocked by policy: confidence {conf:.2f} is below the {floor:.2f} required to propose a production change. "
                         "Gather more evidence, or use ask_operator if you are unsure.", True, {})
-            return {"kind": "approval", "tool_call_id": c.id, "tool": c.name, "args": args, "step": step,
-                    "requested_at": time.time(), "executing": False}
-        return {"kind": "input", "tool_call_id": c.id, "tool": c.name, "args": args, "question": args["question"],
-                "step": step, "requested_at": time.time()}
+            pending = {"kind": "approval", "tool_call_id": c.id, "tool": c.name, "args": args, "step": step,
+                       "requested_at": time.time(), "executing": False}
+            return enrich_pending(pending)
+        pending = {"kind": "input", "tool_call_id": c.id, "tool": c.name, "args": args, "question": args["question"],
+                   "step": step, "requested_at": time.time()}
+        return enrich_pending(pending)
 
     def _apply_memory(self, st: dict, c: ToolCall, spec: ToolSpec) -> tuple:
         from .tools.specs import MemoryArgs

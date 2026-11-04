@@ -28,6 +28,8 @@ class EventRow(Base):
     ts: Mapped[float] = mapped_column(Float, nullable=False)
     type: Mapped[str] = mapped_column(String, nullable=False)
     payload: Mapped[str] = mapped_column(Text, nullable=False)
+    prev_hash: Mapped[str] = mapped_column(String, nullable=False, default="")
+    event_hash: Mapped[str] = mapped_column(String, nullable=False, default="")
 
 
 class InboxRow(Base):

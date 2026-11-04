@@ -320,6 +320,18 @@ def create_app(settings: Settings | None = None, llm=None) -> FastAPI:
         runtime.cancel(run_id)
         return _ok(run_id)
 
+    @app.post("/api/emergency-stop")
+    async def emergency_stop(actor: str = Depends(require_auth)):
+        """Cancel every non-terminal run (fleet-wide kill switch)."""
+        result = runtime.emergency_stop()
+        return {"ok": True, "actor": actor, **result}
+
+    @app.get("/api/runs/{run_id}/events/verify")
+    def verify_events(run_id: str, _: str = Depends(require_auth)):
+        """Recompute the per-run SHA-256 event hash chain (tamper detection)."""
+        runtime.get(run_id)  # 404 if missing
+        return store.verify_event_chain(run_id)
+
     return app
 
 

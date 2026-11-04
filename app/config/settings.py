@@ -72,6 +72,8 @@ class Settings(BaseSettings):
     max_concurrent_runs: int = 10
     max_identical_tool_calls: int = 3
     budget_alert_ratio: float = 0.8
+    # When True, exhausted step/token/cost budgets cancel the run instead of soft-stopping for resume.
+    budget_hard_stop: bool = False
 
     context_budget_tokens: int = 24_000
     tool_output_max_chars: int = 6_000

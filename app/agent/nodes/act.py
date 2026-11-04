@@ -10,7 +10,7 @@ from langchain_core.runnables import RunnableConfig
 from app.context import build_context
 from app.guards import LoopGuard
 from app.llm import ToolCall
-from app.tools import TOOLS, ToolArgsError
+from app.tools import TOOLS, ToolArgsError, present_tool
 
 NUDGE = (
     "You did not call a tool. Continue the investigation with a tool call, "
@@ -101,7 +101,12 @@ async def act_node(state: dict, config: RunnableConfig) -> dict[str, Any]:
 
     for c in calls:
         spec = TOOLS.get(c.name)
-        rt._emit(st, "tool.call", {"id": c.id, "name": c.name, "args": c.args, "kind": spec.kind if spec else "unknown"})
+        ui = present_tool(c.name, c.args, kind=spec.kind if spec else None)
+        rt._emit(st, "tool.call", {
+            "id": c.id, "name": c.name, "args": c.args,
+            "kind": spec.kind if spec else "unknown",
+            **ui,
+        })
 
     results: dict[str, tuple] = {}
     reads: list[tuple[ToolCall, Any]] = []

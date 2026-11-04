@@ -24,28 +24,32 @@ async def prepare_node(state: dict, config: RunnableConfig) -> dict[str, Any]:
         rt._set_status(st, "paused", "Paused by operator at a step boundary")
         st["route"] = "stop"
         return st
+    hard = bool(getattr(rt.settings, "budget_hard_stop", False))
+
+    def _budget_stop(reason: str) -> dict[str, Any]:
+        if hard:
+            rt._set_status(st, "cancelled", reason + " (hard budget stop).")
+        else:
+            rt._set_status(st, "needs_attention", reason)
+        st["route"] = "stop"
+        return st
+
     if st["step"] >= st["max_steps"]:
-        rt._set_status(
-            st,
-            "needs_attention",
+        return _budget_stop(
             f"Step budget of {st['max_steps']} used up without finishing. "
-            "Review the trace, send guidance, and resume to grant 10 more steps.",
+            + ("Run cancelled." if hard else "Review the trace, send guidance, and resume to grant 10 more steps.")
         )
-        st["route"] = "stop"
-        return st
     if st["usage"]["input_tokens"] + st["usage"]["output_tokens"] >= st["max_run_tokens"]:
-        rt._set_status(st, "needs_attention", "Token budget for this run is used up. Resume to grant 50% more.")
-        st["route"] = "stop"
-        return st
-    if rt.settings.max_run_cost_usd > 0 and st["usage"]["cost_usd"] >= st.get("max_run_cost_usd", rt.settings.max_run_cost_usd):
-        rt._set_status(
-            st,
-            "needs_attention",
-            f"Cost budget of ${st.get('max_run_cost_usd', rt.settings.max_run_cost_usd):.2f} "
-            "for this run is used up. Resume to raise it 50%.",
+        return _budget_stop(
+            "Token budget for this run is used up."
+            + (" Run cancelled." if hard else " Resume to grant 50% more.")
         )
-        st["route"] = "stop"
-        return st
+    if rt.settings.max_run_cost_usd > 0 and st["usage"]["cost_usd"] >= st.get("max_run_cost_usd", rt.settings.max_run_cost_usd):
+        return _budget_stop(
+            f"Cost budget of ${st.get('max_run_cost_usd', rt.settings.max_run_cost_usd):.2f} "
+            "for this run is used up."
+            + (" Run cancelled." if hard else " Resume to raise it 50%.")
+        )
 
     if st["status"] != "running":
         rt._set_status(st, "running")
