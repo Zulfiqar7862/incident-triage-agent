@@ -25,8 +25,10 @@ No secrets are included in this file.
 
 ## Offline suite (same machine, no live key required)
 
-- pytest: **41 passed, 3 warnings in 53.88s**
+- pytest: **41 passed**
 - scripted evals: **Passed 3/3 (resolved, root cause named, no wrong changes, injection-safe)**
+- frontend: oxlint + `tsc --noEmit` + Vitest (approval card, tool card, SSE reducer)
+- Playwright UI E2E: full offline scenario including approval, no JS console errors (`python -m scripts.e2e_ui`)
 
 ## How to re-run
 

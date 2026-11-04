@@ -8,6 +8,8 @@ Addressed in recent commits:
 - CORS (`CORS_ORIGINS`), CSP and related security headers
 - Optimistic checkpoint CAS (`CheckpointConflict` → 409)
 - mypy clean and enforced in GitHub Actions / GitLab CI
+- React operator console (Vite) with CSP that does not load remote fonts; SPA served from `frontend/dist`
+- Playwright UI E2E (offline scenario + no console errors) in CI
 
 Still acknowledged (see README limitations):
 
