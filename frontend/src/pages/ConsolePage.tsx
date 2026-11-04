@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { useEffect, useState } from 'react'
+import { ErrorBanner } from '@/components/common/ErrorBanner'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import { RunViewSkeleton } from '@/components/common/Skeletons'
 import { AppHeader } from '@/components/layout/AppHeader'
@@ -16,6 +17,7 @@ import { Timeline } from '@/components/run/Timeline'
 import { RunList } from '@/components/runs/RunList'
 import { useRunStream } from '@/hooks/useRunStream'
 import { createRun, fetchRun, fetchScenarios } from '@/lib/api'
+import { mapError } from '@/lib/errors'
 import { ACTIVE } from '@/lib/types'
 import { useUiStore } from '@/store/uiStore'
 import { useNavigate } from 'react-router-dom'
@@ -60,7 +62,10 @@ export function ConsolePage() {
       navigate(`/runs/${run.run_id}`)
       toast.success('Scenario started')
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => {
+      const f = mapError(e)
+      toast.error(`${f.title} — ${f.explanation}`)
+    },
   })
 
   const run = runQuery.data
@@ -85,15 +90,19 @@ export function ConsolePage() {
             ) : runQuery.isLoading ? (
               <RunViewSkeleton />
             ) : runQuery.error ? (
-              <div className="m-6 rounded-[10px] border border-[var(--color-danger)]/30 bg-[var(--color-danger-soft)] p-4 text-[var(--color-danger)]" role="alert">
-                {(runQuery.error as Error).message}
-                <button type="button" className="ml-3 underline" onClick={() => void runQuery.refetch()}>
-                  Retry
-                </button>
+              <div className="overflow-auto p-6">
+                <ErrorBanner
+                  error={mapError(runQuery.error)}
+                  onAction={() => {
+                    const f = mapError(runQuery.error)
+                    if (f.kind === 'not_found') navigate('/')
+                    else void runQuery.refetch()
+                  }}
+                />
               </div>
             ) : run ? (
               <>
-                <div className="shrink-0 px-7 pt-6">
+                <div className="shrink-0 px-6 pt-5 sm:px-8 sm:pt-6">
                   <RunHeader run={run} />
                   <StepProgress
                     status={run.status}

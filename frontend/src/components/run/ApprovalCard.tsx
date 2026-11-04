@@ -1,8 +1,9 @@
 import { ShieldAlert } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
+import { DataView, TechnicalDetails } from '@/components/common/DataView'
 import { Button } from '@/components/ui/button'
-import { prettyJson, withoutKeys } from '@/lib/format'
+import { humanizeKey, mapError } from '@/lib/errors'
 import type { PendingApproval } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
@@ -20,17 +21,20 @@ function riskLabel(confidence: number) {
   return { label: 'Higher risk', tone: 'text-[var(--color-danger)]' }
 }
 
+const EDITABLE = ['service', 'to_version', 'reason', 'confidence'] as const
+
 export function ApprovalCard({ pending, operator, onApprove, onReject, busy }: Props) {
-  const original = useMemo(() => prettyJson(pending.args), [pending.args])
-  const [argsText, setArgsText] = useState(original)
+  const original = pending.args
+  const [draft, setDraft] = useState<Record<string, unknown>>(() => ({ ...original }))
   const [feedback, setFeedback] = useState('')
-  const [editing, setEditing] = useState(false)
-  const rootRef = useRef<HTMLDivElement>(null)
+  const [showEdit, setShowEdit] = useState(false)
 
   useEffect(() => {
-    setArgsText(original)
-    setEditing(false)
-  }, [original, pending.tool_call_id])
+    setDraft({ ...pending.args })
+    setShowEdit(false)
+    // Reset when a new approval request arrives
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pending.tool_call_id])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -48,32 +52,25 @@ export function ApprovalCard({ pending, operator, onApprove, onReject, busy }: P
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [argsText, feedback, operator, pending])
+  }, [draft, feedback, operator, pending])
 
-  const conf = Math.round(Number(pending.args.confidence || 0) * 100)
-  const risk = riskLabel(Number(pending.args.confidence || 0))
-  const edited = argsText.trim() !== original.trim()
-  const service = String(pending.args.service || '')
-  const reason = String(pending.args.reason || '')
-  const briefArgs = withoutKeys(pending.args, ['reason', 'confidence'])
+  const conf = Math.round(Number(draft.confidence ?? original.confidence ?? 0) * 100)
+  const risk = riskLabel(Number(draft.confidence ?? original.confidence ?? 0))
+  const edited = useMemo(() => JSON.stringify(draft) !== JSON.stringify(original), [draft, original])
+  const service = String(draft.service || original.service || '')
+  const reason = String(draft.reason || original.reason || '')
 
   async function handleApprove() {
     if (!operator.trim()) {
       toast.error('Enter your name first — approvals are recorded in the audit log.')
       return
     }
-    let args: Record<string, unknown>
     try {
-      args = JSON.parse(argsText) as Record<string, unknown>
-    } catch {
-      toast.error('Arguments must be valid JSON.')
-      return
-    }
-    try {
-      await onApprove(args)
+      await onApprove(draft)
       toast.success(edited ? 'Approved with edited arguments' : 'Approved — change is applying')
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Approve failed')
+      const f = mapError(e)
+      toast.error(`${f.title} — ${f.explanation}`)
     }
   }
 
@@ -82,13 +79,17 @@ export function ApprovalCard({ pending, operator, onApprove, onReject, busy }: P
       await onReject(feedback)
       toast.message('Rejected — feedback sent to the agent')
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Reject failed')
+      const f = mapError(e)
+      toast.error(`${f.title} — ${f.explanation}`)
     }
   }
 
+  const displayArgs = Object.fromEntries(
+    Object.entries(draft).filter(([k]) => !['reason', 'confidence'].includes(k)),
+  )
+
   return (
     <div
-      ref={rootRef}
       className={cn(
         'animate-attention rounded-[14px] border border-[var(--color-warning-border)] bg-[var(--color-warning-soft)] p-4 shadow-sm',
       )}
@@ -100,8 +101,8 @@ export function ApprovalCard({ pending, operator, onApprove, onReject, busy }: P
         <ShieldAlert className="size-4" />
         <h2 className="m-0 text-sm font-semibold tracking-tight">Approve a production change</h2>
       </div>
-      <p className="m-0 mb-1.5 text-sm">
-        The agent wants to run <code className="font-mono text-[12.5px]">{pending.tool}</code>
+      <p className="m-0 mb-1.5 text-sm leading-relaxed">
+        The agent wants to run <span className="font-semibold">{humanizeKey(pending.tool)}</span>
         {service ? (
           <>
             {' '}
@@ -110,7 +111,7 @@ export function ApprovalCard({ pending, operator, onApprove, onReject, busy }: P
         ) : null}
         .
       </p>
-      {reason ? <p className="m-0 mb-2 text-xs text-[var(--color-fg-secondary)]">{reason}</p> : null}
+      {reason ? <p className="m-0 mb-3 text-xs leading-relaxed text-[var(--color-fg-secondary)]">{reason}</p> : null}
       <div className="mb-1 flex items-center justify-between text-xs">
         <span>
           Agent confidence: <b>{conf}%</b>
@@ -126,32 +127,55 @@ export function ApprovalCard({ pending, operator, onApprove, onReject, busy }: P
       >
         <i className="block h-full rounded-sm bg-[var(--color-warning)]" style={{ width: `${conf}%` }} />
       </div>
-      <div className="mb-2 rounded-md border border-[var(--color-border)] bg-[var(--color-elevated)] p-2 font-mono text-[11.5px] text-[var(--color-fg-secondary)]">
-        {pending.tool}({argPreview(briefArgs)})
+
+      <div className="mb-3 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-elevated)] p-3">
+        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-fg-tertiary)]">Proposed change</div>
+        <DataView data={displayArgs} compact />
+        <TechnicalDetails data={original} />
       </div>
-      <label className="text-xs text-[var(--color-fg-secondary)]" htmlFor="apArgs">
-        Arguments {edited ? <span className="text-[var(--color-warning)]">(edited — diff below)</span> : '(edit before approving if needed)'}
-      </label>
-      <textarea
-        id="apArgs"
-        spellCheck={false}
-        className="mt-1.5 mb-2 w-full min-h-[120px] resize-y rounded-md border border-[var(--color-border)] bg-[var(--color-elevated)] p-2.5 font-mono text-xs leading-relaxed"
-        value={argsText}
-        onChange={(e) => {
-          setArgsText(e.target.value)
-          setEditing(true)
-        }}
-      />
-      {editing && edited ? (
-        <div className="mb-3 grid gap-2 md:grid-cols-2" data-testid="args-diff">
-          <pre className="max-h-40 overflow-auto rounded-md border border-[var(--color-border)] bg-[var(--color-subtle)] p-2 text-[11px] text-[var(--color-fg-tertiary)]">
-            {original}
-          </pre>
-          <pre className="max-h-40 overflow-auto rounded-md border border-[var(--color-warning-border)] bg-[var(--color-elevated)] p-2 text-[11px]">
-            {argsText}
-          </pre>
+
+      <button
+        type="button"
+        className="mb-2 text-xs font-medium text-[var(--color-accent)] underline-offset-2 hover:underline"
+        onClick={() => setShowEdit((v) => !v)}
+      >
+        {showEdit ? 'Hide edit fields' : 'Edit before approving'}
+      </button>
+
+      {showEdit ? (
+        <div className="mb-3 space-y-2 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-elevated)] p-3" data-testid="args-diff">
+          {EDITABLE.filter((k) => k in original || k in draft).map((key) => (
+            <label key={key} className="block text-xs">
+              <span className="mb-1 block font-medium text-[var(--color-fg-secondary)]">{humanizeKey(key)}</span>
+              {key === 'reason' ? (
+                <textarea
+                  className="w-full min-h-[72px] resize-y rounded-md border border-[var(--color-border)] bg-[var(--color-subtle)] px-2.5 py-1.5 text-sm"
+                  value={String(draft[key] ?? '')}
+                  onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.value }))}
+                />
+              ) : key === 'confidence' ? (
+                <input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-subtle)] px-2.5 py-1.5 text-sm"
+                  value={Number(draft[key] ?? 0)}
+                  onChange={(e) => setDraft((d) => ({ ...d, [key]: Number(e.target.value) }))}
+                />
+              ) : (
+                <input
+                  className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-subtle)] px-2.5 py-1.5 text-sm"
+                  value={String(draft[key] ?? '')}
+                  onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.value }))}
+                />
+              )}
+            </label>
+          ))}
+          {edited ? <p className="m-0 text-[11px] text-[var(--color-warning)]">Edits will be recorded in the audit log.</p> : null}
         </div>
       ) : null}
+
       <Button id="apOk" variant="approve" disabled={busy} onClick={() => void handleApprove()} className="w-full sm:w-auto">
         Approve and run <kbd className="ml-2 rounded bg-black/15 px-1.5 text-[10px]">A</kbd>
       </Button>
@@ -173,10 +197,4 @@ export function ApprovalCard({ pending, operator, onApprove, onReject, busy }: P
       </p>
     </div>
   )
-}
-
-function argPreview(a: Record<string, unknown>) {
-  return Object.entries(a)
-    .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`)
-    .join(', ')
 }

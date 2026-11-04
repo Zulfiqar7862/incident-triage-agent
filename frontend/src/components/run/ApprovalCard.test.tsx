@@ -21,7 +21,7 @@ describe('ApprovalCard', () => {
       <ApprovalCard pending={pending} operator="Alex" onApprove={vi.fn()} onReject={vi.fn()} />,
     )
     expect(screen.getByTestId('approval-card')).toBeInTheDocument()
-    expect(screen.getAllByText(/rollback_deploy/).length).toBeGreaterThan(0)
+    expect(screen.getByText(/Rollback Deploy/i)).toBeInTheDocument()
     expect(screen.getByText(/82%/)).toBeInTheDocument()
     expect(screen.getByText(/Moderate risk/i)).toBeInTheDocument()
     expect(screen.getByText(/Keyboard/i)).toBeInTheDocument()

@@ -10,6 +10,7 @@ import {
   rejectRun,
   resumeRun,
 } from '@/lib/api'
+import { mapError } from '@/lib/errors'
 import { money, num } from '@/lib/format'
 import { RESUMABLE, TERMINAL, type PendingApproval, type RunDetail } from '@/lib/types'
 import { useUiStore } from '@/store/uiStore'
@@ -34,7 +35,8 @@ export function SidePanel({
       await fn()
       onRefresh()
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Action failed')
+      const f = mapError(e)
+      toast.error(`${f.title} — ${f.explanation}`)
     } finally {
       setBusy(false)
     }
@@ -43,7 +45,7 @@ export function SidePanel({
   const pending = run.pending
 
   return (
-    <aside className="col side flex flex-col gap-0 overflow-auto border-l border-[var(--color-border)] bg-[var(--color-elevated)] p-4" aria-label="Run controls and state">
+    <aside className="col side sticky top-0 flex max-h-[100dvh] flex-col gap-0 overflow-auto border-l border-[var(--color-border)] bg-[var(--color-elevated)] p-4" aria-label="Run controls and state">
       <section className="mb-4 border-b border-[var(--color-border)] pb-4">
         <div className="text-sm font-semibold capitalize">{run.status.replaceAll('_', ' ')}</div>
         {run.status_reason ? <p className="mt-1.5 text-[12.5px] text-[var(--color-fg-secondary)]">{run.status_reason}</p> : null}

@@ -86,17 +86,23 @@ function renderEvent(ev: AgentEvent): ReactNode {
           {p.reason ? `. ${String(p.reason)}` : ''}
         </div>
       )
-    case 'llm.call': {
+    case 'llm.call':
+    case 'gen_ai.span': {
       const c = (p.context || {}) as Record<string, number>
       return (
-        <div className="flex flex-wrap gap-x-3.5 font-mono text-[11.5px] text-[var(--color-fg-tertiary)]">
-          <span>{num(p.input_tokens as number)} in</span>
-          <span>{num(p.output_tokens as number)} out</span>
-          <span>{num(p.latency_ms as number)} ms</span>
-          <span>{money(p.cost_usd as number)}</span>
-          <span>
-            ctx {num(c.total_tokens)}/{num(c.budget)}
-          </span>
+        <div className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-elevated)] px-3.5 py-2.5 text-[13px] text-[var(--color-fg-secondary)]">
+          <div className="mb-1 text-xs font-semibold text-[var(--color-fg-tertiary)]">Model call</div>
+          <div className="flex flex-wrap gap-x-3.5 gap-y-1 text-[12.5px]">
+            <span>{num(p.input_tokens as number)} tokens in</span>
+            <span>{num(p.output_tokens as number)} out</span>
+            <span>{num(p.latency_ms as number)} ms</span>
+            <span>{money(p.cost_usd as number)}</span>
+            {c.total_tokens != null ? (
+              <span>
+                context {num(c.total_tokens)}/{num(c.budget)}
+              </span>
+            ) : null}
+          </div>
         </div>
       )
     }
@@ -158,7 +164,11 @@ function renderEvent(ev: AgentEvent): ReactNode {
     case 'llm.retry':
       return <div className="text-[13px] text-[var(--color-fg-secondary)]">{labelFor(ev)}</div>
     default:
-      return <div className="text-[13px] text-[var(--color-fg-tertiary)]">{ev.type}</div>
+      return (
+        <div className="text-[13px] text-[var(--color-fg-tertiary)]">
+          {ev.type.replaceAll('.', ' · ').replaceAll('_', ' ')}
+        </div>
+      )
   }
 }
 

@@ -1,7 +1,11 @@
 import * as Dialog from '@radix-ui/react-dialog'
 import { useQuery } from '@tanstack/react-query'
+import { DataView, TechnicalDetails } from '@/components/common/DataView'
+import { parseMaybeJson } from '@/lib/dataDisplay'
+import { ErrorBanner } from '@/components/common/ErrorBanner'
 import { Button } from '@/components/ui/button'
 import { fetchContext } from '@/lib/api'
+import { mapError } from '@/lib/errors'
 import { num } from '@/lib/format'
 
 export function ContextInspector({
@@ -32,20 +36,18 @@ export function ContextInspector({
           </div>
           <div className="overflow-auto p-4">
             {q.isLoading ? <p className="text-sm text-[var(--color-fg-tertiary)]">Loading context…</p> : null}
-            {q.error ? (
-              <p className="text-sm text-[var(--color-danger)]">{(q.error as Error).message}</p>
-            ) : null}
+            {q.error ? <ErrorBanner error={mapError(q.error)} onAction={() => void q.refetch()} /> : null}
             {q.data ? (
               <>
                 <p className="mt-0 text-xs text-[var(--color-fg-secondary)]">
                   Rebuilt from the latest checkpoint. About {num(q.data.stats.total_tokens)} of{' '}
                   {num(q.data.stats.budget)} tokens.
                 </p>
-                <div className="mb-3">
+                <div className="mb-4">
                   <div className="mb-1 text-xs font-semibold text-[var(--color-fg-secondary)]">System prompt</div>
-                  <pre className="max-h-60 overflow-auto rounded-md border border-[var(--color-border)] bg-[var(--color-subtle)] p-2.5 font-mono text-[11.5px] whitespace-pre-wrap">
+                  <p className="m-0 max-h-40 overflow-auto rounded-[10px] border border-[var(--color-border)] bg-[var(--color-subtle)] p-3 text-sm leading-relaxed whitespace-pre-wrap">
                     {q.data.system}
-                  </pre>
+                  </p>
                 </div>
                 {q.data.messages.map((m, i) => {
                   const role = String(m.role || '')
@@ -55,18 +57,40 @@ export function ContextInspector({
                       : role === 'assistant'
                         ? 'Agent'
                         : 'User'
-                  const body =
-                    role === 'assistant'
-                      ? `${m.text ? String(m.text) + '\n' : ''}${((m.tool_calls as Array<{ name: string; args: unknown }>) || [])
-                          .map((t) => `→ ${t.name}(${JSON.stringify(t.args)})`)
-                          .join('\n')}`
-                      : String(m.content || '')
                   return (
-                    <div key={i} className="mb-3">
-                      <div className="mb-1 text-xs font-semibold text-[var(--color-fg-secondary)]">{label}</div>
-                      <pre className="max-h-60 overflow-auto rounded-md border border-[var(--color-border)] bg-[var(--color-subtle)] p-2.5 font-mono text-[11.5px] whitespace-pre-wrap">
-                        {body}
-                      </pre>
+                    <div key={i} className="mb-4">
+                      <div className="mb-1.5 text-xs font-semibold text-[var(--color-fg-secondary)]">{label}</div>
+                      {role === 'assistant' ? (
+                        <div className="space-y-2 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-subtle)] p-3">
+                          {m.text ? <p className="m-0 text-sm leading-relaxed whitespace-pre-wrap">{String(m.text)}</p> : null}
+                          {Array.isArray(m.tool_calls) && m.tool_calls.length ? (
+                            <div className="space-y-2">
+                              {(m.tool_calls as Array<{ name: string; args: unknown }>).map((t, j) => (
+                                <div key={j}>
+                                  <div className="text-xs font-medium text-[var(--color-fg-secondary)]">{String(t.name)}</div>
+                                  <DataView data={t.args} compact />
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <div className="rounded-[10px] border border-[var(--color-border)] bg-[var(--color-subtle)] p-3">
+                          {typeof m.content === 'string' ? (
+                            (() => {
+                              const parsed = parseMaybeJson(String(m.content))
+                              return typeof parsed === 'string' ? (
+                                <p className="m-0 max-h-48 overflow-auto text-sm leading-relaxed whitespace-pre-wrap">{parsed}</p>
+                              ) : (
+                                <DataView data={parsed} compact />
+                              )
+                            })()
+                          ) : (
+                            <DataView data={m.content} compact />
+                          )}
+                          <TechnicalDetails data={m} />
+                        </div>
+                      )}
                     </div>
                   )
                 })}
