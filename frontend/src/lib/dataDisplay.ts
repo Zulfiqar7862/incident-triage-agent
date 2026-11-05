@@ -1,5 +1,4 @@
 import { formatElapsed, money, num } from '@/lib/format'
-import { describeTool, titleCaseWords } from '@/lib/humanize'
 
 export function formatScalar(value: unknown, keyHint?: string): string {
   if (value == null) return '—'
@@ -22,6 +21,22 @@ export function formatScalar(value: unknown, keyHint?: string): string {
       const d = new Date(value)
       if (!Number.isNaN(d.getTime())) return d.toLocaleString()
     }
+    if (keyHint && /severity|priority|sev/i.test(keyHint)) {
+      const map: Record<string, string> = {
+        P1: 'Critical',
+        P2: 'High',
+        P3: 'Medium',
+        P4: 'Low',
+        SEV1: 'Critical',
+        SEV2: 'High',
+        SEV3: 'Medium',
+        SEV4: 'Low',
+      }
+      const hit = map[value.toUpperCase()] || map[value]
+      if (hit) return hit
+    }
+    // Never surface raw alert ticket ids in the default operator view
+    if (keyHint && /^id$/i.test(keyHint) && /^ALRT-/i.test(value)) return 'Alert'
     return value
   }
   return String(value)
@@ -38,11 +53,6 @@ export function parseMaybeJson(raw: string): unknown {
     }
   }
   return raw
-}
-
-/** @deprecated Prefer describeTool / toolNoun from humanize */
-export function humanToolName(name: string): string {
-  return describeTool(name) || titleCaseWords(name)
 }
 
 export function statusTone(s: string): 'ok' | 'warn' | 'danger' | 'accent' | 'neutral' {

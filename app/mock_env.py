@@ -15,6 +15,8 @@ from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
 
+from app.tools.display import alert_card
+
 SCENARIO_DIR = Path(__file__).resolve().parent.parent / "scenarios"
 NOW = datetime(2026, 11, 3, 14, 30, 0, tzinfo=UTC)  # fixed "now" keeps output deterministic
 POD_SUFFIXES = ["7f9c4-a1b2", "7f9c4-c3d4", "7f9c4-e5f6"]
@@ -43,10 +45,17 @@ def load_scenario(scenario_id: str) -> dict:
 
 
 def list_scenarios() -> list[dict]:
+    """Operator-facing scenario cards — no ALRT-/P-code jargon in default fields."""
     out = []
     for p in sorted(SCENARIO_DIR.glob("*.json")):
         s = json.loads(p.read_text())
-        out.append({"id": s["id"], "title": s["title"], "description": s["description"], "alert": s["alert"]})
+        card = alert_card(s["alert"])
+        out.append({
+            "id": s["id"],
+            "title": s["title"],
+            "description": card["summary"],
+            "alert": card,
+        })
     return out
 
 

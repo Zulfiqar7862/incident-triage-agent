@@ -36,6 +36,7 @@ from .mock_env import MockCluster, ToolError, ToolTransientError, load_scenario
 from .observability.tracing import span as otel_span
 from .store import Store
 from .tools import TOOLS, ToolArgsError, ToolSpec, enrich_pending, tool_schemas
+from .tools.display import alert_card, plain_task_from_alert, status_words
 
 log = logging.getLogger("agent")
 
@@ -72,8 +73,8 @@ def _new_state(run_id: str, scenario: dict, settings: Settings) -> dict:
         "scenario_id": scenario["id"],
         "title": scenario["title"],
         "service": a["service"],
-        "task": (f"Alert {a['id']} ({a['severity']}) on {a['service']}: {a['title']}. "
-                 "Investigate, find the root cause, remediate safely, and verify."),
+        "task": plain_task_from_alert(a),
+        "alert": alert_card(a),
         "status": "queued",
         "status_reason": None,
         "created_at": time.time(),
@@ -148,6 +149,15 @@ class Runtime:
         view = {k: v for k, v in st.items() if k not in ("history", "env")}
         view["active"] = self.is_active(st["run_id"])
         view["history_messages"] = len(st["history"])
+        view["status_label"] = status_words(str(st.get("status") or ""))
+        if not view.get("alert"):
+            try:
+                from .mock_env import load_scenario
+                a = load_scenario(st["scenario_id"])["alert"]
+                view["alert"] = alert_card(a)
+                view["task"] = plain_task_from_alert(a)
+            except Exception:  # noqa: BLE001
+                pass
         if view.get("pending"):
             view["pending"] = enrich_pending(view["pending"])
         if include_history:
@@ -642,7 +652,7 @@ class Runtime:
     def _set_status(self, st: dict, status: str, reason: str | None = None) -> None:
         st["status"], st["status_reason"] = status, reason
         self.store.save(st)
-        self._emit(st, "run.status", {"status": status, "reason": reason})
+        self._emit(st, "run.status", {"status": status, "status_label": status_words(status), "reason": reason})
 
     def _emit(self, st: dict, type_: str, payload: dict) -> None:
         payload = {"step": st["step"], **payload}

@@ -16,7 +16,7 @@ The agent plans an investigation, calls tools (metrics, logs, deploys, runbooks)
 
 ![Mobile](docs/screenshots/03-mobile.png)
 
-Screenshots under [`docs/screenshots/`](docs/screenshots/). Recapture with `python -m scripts.capture_screenshots`. Operator walkthrough: [`docs/DEMO.md`](docs/DEMO.md) and [`docs/screenshots/walkthrough.mp4`](docs/screenshots/walkthrough.mp4).
+Screenshots under [`docs/screenshots/`](docs/screenshots/). Recapture with `python -m scripts.capture_screenshots`. Operator walkthrough: [`docs/WALKTHROUGH.md`](docs/WALKTHROUGH.md) and [`docs/screenshots/walkthrough.mp4`](docs/screenshots/walkthrough.mp4).
 
 ---
 
@@ -205,7 +205,7 @@ scenarios/           Curated incident scenarios
 runbooks/            Tool-backed runbook content
 evals/               Offline deterministic evaluation harness
 scripts/             quickstart, screenshots, UI E2E, live E2E
-docs/                HARDENING, E2E_RESULTS, DEMO walkthrough, screenshots
+docs/                HARDENING, E2E_RESULTS, operator walkthrough, screenshots
 ```
 
 ---

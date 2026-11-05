@@ -14,6 +14,7 @@ function phaseIndex(status: RunStatus, step: number, hasPlan: boolean, hasResult
   return 3
 }
 
+/** Vertical full-text step list — never truncated pills. */
 export function StepProgress({
   status,
   step,
@@ -30,7 +31,7 @@ export function StepProgress({
 
   return (
     <ol
-      className="mb-4 flex flex-wrap items-center gap-1 overflow-x-auto pb-1"
+      className="mb-4 flex flex-col gap-1.5 border-l border-[var(--color-border)] pl-3"
       aria-label="Investigation progress"
       data-testid="step-progress"
     >
@@ -38,26 +39,25 @@ export function StepProgress({
         const done = i < current || status === 'completed'
         const active = i === current && status !== 'completed'
         return (
-          <li key={`${label}-${i}`} className="flex items-center gap-1">
-            <span
-              className={cn(
-                'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold',
-                done && 'border-[var(--color-success)]/40 bg-[var(--color-success-soft)] text-[var(--color-success)]',
-                active && 'border-[var(--color-accent)]/40 bg-[var(--color-accent-soft)] text-[var(--color-accent)]',
-                !done && !active && 'border-[var(--color-border)] bg-[var(--color-elevated)] text-[var(--color-fg-tertiary)]',
-              )}
-              title={label}
-            >
+          <li
+            key={`${label}-${i}`}
+            className={cn(
+              'relative flex items-start gap-2 text-sm leading-snug',
+              done && 'text-[var(--color-success)]',
+              active && 'font-semibold text-[var(--color-accent)]',
+              !done && !active && 'text-[var(--color-fg-tertiary)]',
+            )}
+          >
+            <span className="mt-0.5 shrink-0">
               {done ? (
-                <Check className="size-3" />
+                <Check className="size-3.5" aria-hidden />
               ) : active ? (
-                <Loader2 className="size-3 animate-spin" />
+                <Loader2 className="size-3.5 animate-spin" aria-hidden />
               ) : (
-                <Circle className="size-3" />
+                <Circle className="size-3.5" aria-hidden />
               )}
-              <span className="max-w-[12ch] truncate">{label}</span>
             </span>
-            {i < labels.length - 1 ? <span className="mx-0.5 h-px w-3 bg-[var(--color-border)]" aria-hidden /> : null}
+            <span className="min-w-0 whitespace-normal break-words">{label}</span>
           </li>
         )
       })}

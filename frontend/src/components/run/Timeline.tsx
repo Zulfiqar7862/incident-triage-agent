@@ -2,7 +2,6 @@ import { ArrowDown } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { ToolCard, type ToolCardModel } from '@/components/run/ToolCard'
-import { describeTool, humanizeEmbeddedCalls, toolNoun } from '@/lib/humanize'
 import type { AgentEvent } from '@/lib/types'
 
 const HIDDEN_TYPES = new Set([
@@ -15,6 +14,10 @@ const HIDDEN_TYPES = new Set([
 
 const META_TOOLS = new Set(['update_working_memory'])
 
+function apiSummary(p: Record<string, unknown>, fallback = ''): string {
+  return String(p.summary || p.title || fallback)
+}
+
 function buildTools(events: AgentEvent[]): Map<string, ToolCardModel> {
   const map = new Map<string, ToolCardModel>()
   for (const ev of events) {
@@ -25,6 +28,9 @@ function buildTools(events: AgentEvent[]): Map<string, ToolCardModel> {
         name: String(p.name || ''),
         args: (p.args as Record<string, unknown>) || {},
         kind: p.kind as string | undefined,
+        title: p.title as string | undefined,
+        summary: p.summary as string | undefined,
+        risk: p.risk as string | undefined,
         status: p.kind === 'write' ? 'waiting' : 'running',
       })
     } else if (ev.type === 'tool.retry') {
@@ -38,6 +44,8 @@ function buildTools(events: AgentEvent[]): Map<string, ToolCardModel> {
           id,
           name: String(p.name || 'tool'),
           args: {},
+          title: p.title as string | undefined,
+          summary: p.summary as string | undefined,
           status: 'ok',
         } satisfies ToolCardModel)
       existing.status = p.is_error ? 'error' : 'ok'
@@ -48,7 +56,12 @@ function buildTools(events: AgentEvent[]): Map<string, ToolCardModel> {
       map.set(id, existing)
     } else if (ev.type === 'approval.requested') {
       const t = map.get(String(p.tool_call_id))
-      if (t) t.status = 'waiting'
+      if (t) {
+        t.status = 'waiting'
+        if (p.title) t.title = String(p.title)
+        if (p.summary) t.summary = String(p.summary)
+        if (p.risk) t.risk = String(p.risk)
+      }
     }
   }
   return map
@@ -64,7 +77,7 @@ function labelFor(ev: AgentEvent): string {
     case 'memory.saved':
       return 'Saved a short note for next time'
     default:
-      return humanizeEmbeddedCalls(String(ev.type))
+      return String(ev.type).replaceAll('.', ' ').replaceAll('_', ' ')
   }
 }
 
@@ -80,12 +93,12 @@ function renderEvent(ev: AgentEvent): ReactNode {
         </div>
       )
     case 'run.status': {
-      const status = String(p.status).replaceAll('_', ' ')
-      const reason = p.reason ? humanizeEmbeddedCalls(String(p.reason)) : ''
+      // Prefer backend status_label when present; avoid duplicating the side-panel status.
+      const label = String(p.status_label || String(p.status || '').replaceAll('_', ' '))
+      const reason = p.reason ? String(p.reason) : ''
       return (
         <div className="text-[13px] text-[var(--color-fg-secondary)]">
-          Status: <b className="text-[var(--color-fg)]">{status}</b>
-          {reason ? `. ${reason}` : ''}
+          {reason || `Status updated: ${label}`}
         </div>
       )
     }
@@ -98,28 +111,23 @@ function renderEvent(ev: AgentEvent): ReactNode {
     case 'policy.blocked':
       return (
         <div className="rounded-r-[10px] border-l-4 border-[var(--color-danger)] bg-[var(--color-danger-soft)] px-3.5 py-2.5 text-[13px]">
-          Skipped {toolNoun(String(p.tool))}: confidence too low to change production safely.
+          Skipped a proposed change: {apiSummary(p, 'confidence or scope was not safe enough')}.
         </div>
       )
-    case 'approval.requested': {
-      const tool = String(p.tool || '')
-      const args = (p.args as Record<string, unknown>) || {}
+    case 'approval.requested':
       return (
         <div className="rounded-r-[10px] border-l-4 border-[var(--color-warning)] bg-[var(--color-warning-soft)] px-3.5 py-3">
           <b>Waiting for your approval</b>
-          <p className="m-0 mt-1 text-[13px] leading-relaxed">{describeTool(tool, args)}</p>
+          <p className="m-0 mt-1 text-[13px] leading-relaxed">{apiSummary(p, 'A production change is waiting')}</p>
         </div>
       )
-    }
     case 'approval.decided': {
-      const tool = String(p.tool || '')
-      const args = (p.args as Record<string, unknown>) || {}
       const decision = String(p.decision || '')
       const verb = decision === 'approved' ? 'approved' : decision === 'rejected' ? 'rejected' : decision
       return (
         <div className="text-[13px] text-[var(--color-fg-secondary)]">
           <b className="text-[var(--color-fg)]">{String(p.actor || 'You')}</b> {verb}{' '}
-          {describeTool(tool, args)}
+          {apiSummary(p, 'the proposed change')}
           {p.edited ? ' (with edits)' : ''}
           {p.feedback ? `: “${String(p.feedback)}”` : ''}
         </div>

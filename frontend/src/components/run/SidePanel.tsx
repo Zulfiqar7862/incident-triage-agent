@@ -14,7 +14,6 @@ import {
 } from '@/lib/api'
 import { mapError } from '@/lib/errors'
 import { money, num } from '@/lib/format'
-import { humanizeEmbeddedCalls, statusLabel } from '@/lib/humanize'
 import { RESUMABLE, TERMINAL, type PendingApproval, type RunDetail } from '@/lib/types'
 import { useUiStore } from '@/store/uiStore'
 import { cn } from '@/lib/utils'
@@ -50,7 +49,7 @@ export function SidePanel({
   }
 
   const pending = run.pending
-  const reason = humanizeEmbeddedCalls(run.status_reason)
+  const reason = run.status_reason || ""
 
   return (
     <aside
@@ -58,7 +57,7 @@ export function SidePanel({
       aria-label="Run controls and state"
     >
       <section className="mb-5 border-b border-[var(--color-border)] pb-5">
-        <div className="text-base font-semibold tracking-tight">{statusLabel(run.status)}</div>
+        <div className="text-base font-semibold tracking-tight">{run.status_label || run.status.replaceAll("_", " ")}</div>
         {reason ? <p className="mt-2 text-sm leading-relaxed text-[var(--color-fg-secondary)]">{reason}</p> : null}
         <div className="mt-4 flex flex-wrap gap-2">
           <Button disabled={busy || !(run.active && run.status === 'running')} onClick={() => void act(() => pauseRun(run.run_id))}>
@@ -196,7 +195,7 @@ export function SidePanel({
           </p>
           {run.result.fix_applied ? (
             <p className="text-sm leading-relaxed">
-              <b>Fix applied.</b> {humanizeEmbeddedCalls(String(run.result.fix_applied))}
+              <b>Fix applied.</b> {String(run.result.fix_applied)}
             </p>
           ) : null}
         </section>

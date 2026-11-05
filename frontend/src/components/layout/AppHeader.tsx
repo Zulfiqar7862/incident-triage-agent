@@ -54,8 +54,8 @@ export function AppHeader() {
         {health.isError
           ? 'Can’t reach the server'
           : offline
-            ? 'Demo mode (offline)'
-            : 'Live assistant'}
+            ? 'Offline provider (CI / local)'
+            : 'Live model'}
       </span>
       <span className="min-w-2 flex-1" />
       <div className="header-actions flex flex-wrap items-center gap-2">

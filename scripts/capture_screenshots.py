@@ -94,7 +94,7 @@ def main() -> int:
             page.wait_for_selector('[data-testid="approval-card"]', timeout=30000)
             page.wait_for_timeout(500)
             page.screenshot(path=str(OUT / "approval-gate.png"), full_page=True)
-            page.screenshot(path=str(OUT / "demo-01-approval.png"), full_page=True)
+            page.screenshot(path=str(OUT / "walkthrough-01-approval.png"), full_page=True)
 
             page.click("#apOk")
             # Capture toast shortly after approve
@@ -103,7 +103,7 @@ def main() -> int:
             page.wait_for_selector(".outcome", timeout=60000)
             page.wait_for_timeout(600)
             page.screenshot(path=str(OUT / "resolved.png"), full_page=True)
-            page.screenshot(path=str(OUT / "demo-02-resolved.png"), full_page=True)
+            page.screenshot(path=str(OUT / "walkthrough-02-resolved.png"), full_page=True)
 
             page2 = browser.new_page(viewport={"width": 1440, "height": 900}, color_scheme="dark")
             page2.on("console", on_console)
@@ -147,11 +147,11 @@ def main() -> int:
         try:
             from PIL import Image
 
-            frames = [Image.open(OUT / n) for n in ("demo-01-approval.png", "demo-02-resolved.png")]
+            frames = [Image.open(OUT / n) for n in ("walkthrough-01-approval.png", "walkthrough-02-resolved.png")]
             w = min(f.width for f in frames)
             h = min(f.height for f in frames)
             frames = [f.crop((0, 0, w, h)) for f in frames]
-            frames[0].save(OUT / "demo.gif", save_all=True, append_images=frames[1:], duration=1400, loop=0)
+            frames[0].save(OUT / "walkthrough.gif", save_all=True, append_images=frames[1:], duration=1400, loop=0)
         except Exception as e:  # noqa: BLE001
             print("gif skipped:", e)
 

@@ -183,3 +183,22 @@ def test_emergency_stop_and_verify_http(tmp_path):
         v = client.get(f"/api/runs/{rid}/events/verify")
         assert v.status_code == 200
         assert v.json()["ok"] is True
+
+
+def test_public_alert_card_has_no_pcodes(tmp_path):
+    from app.agent.state import make_run_id, new_run_state
+    from app.mock_env import load_scenario
+
+    settings = Settings(db_path=str(tmp_path / "a.db"), tool_backoff_s=0.01)
+    store = Store(settings.db_path)
+    rt = Runtime(store, ScriptedPolicy(delay_s=0), settings)
+    scenario = load_scenario("db-pool-regression")
+    st = new_run_state(make_run_id(), scenario, settings)
+    store.create_run(st)
+    pub = rt.public(st)
+    assert "ALRT" not in pub["task"]
+    assert "P1" not in pub["task"]
+    assert pub["alert"]["severity"] == "Critical"
+    assert pub["alert"]["severity_code"] == "P1"  # engineers only
+    assert pub["status_label"]
+    assert "ALRT" not in pub["alert"]["summary"]

@@ -7,7 +7,6 @@ import { Button } from '@/components/ui/button'
 import { fetchContext } from '@/lib/api'
 import { mapError } from '@/lib/errors'
 import { num } from '@/lib/format'
-import { describeTool, titleCaseWords } from '@/lib/humanize'
 
 export function ContextInspector({
   runId,
@@ -54,7 +53,7 @@ export function ContextInspector({
                   const role = String(m.role || '')
                   const label =
                     role === 'tool'
-                      ? `Result: ${titleCaseWords(String(m.name || ''))}`
+                      ? `Result: ${String(m.name || '').replaceAll('_', ' ')}`
                       : role === 'assistant'
                         ? 'Assistant'
                         : 'You'
@@ -69,7 +68,7 @@ export function ContextInspector({
                               {(m.tool_calls as Array<{ name: string; args: unknown }>).map((t, j) => (
                                 <div key={j}>
                                   <div className="text-xs font-medium text-[var(--color-fg-secondary)]">
-                                    {describeTool(String(t.name), (t.args as Record<string, unknown>) || {})}
+                                    {String(t.name || '').replaceAll('_', ' ')}
                                   </div>
                                   <DataView data={t.args} compact />
                                 </div>

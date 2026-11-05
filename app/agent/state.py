@@ -8,6 +8,7 @@ from typing import Annotated, Any, NotRequired
 from typing_extensions import TypedDict
 
 from app.config import Settings
+from app.tools.display import alert_card, plain_task_from_alert
 
 
 def _last(left: Any, right: Any) -> Any:
@@ -57,10 +58,8 @@ def new_run_state(run_id: str, scenario: dict, settings: Settings) -> dict:
         "scenario_id": scenario["id"],
         "title": scenario["title"],
         "service": a["service"],
-        "task": (
-            f"Alert {a['id']} ({a['severity']}) on {a['service']}: {a['title']}. "
-            "Investigate, find the root cause, remediate safely, and verify."
-        ),
+        "task": plain_task_from_alert(a),
+        "alert": alert_card(a),
         "status": "queued",
         "status_reason": None,
         "created_at": time.time(),

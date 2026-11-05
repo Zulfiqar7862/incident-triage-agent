@@ -9,7 +9,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.types import interrupt
 
 from app.llm import ToolCall
-from app.tools import TOOLS, ToolArgsError
+from app.tools import TOOLS, ToolArgsError, present_tool
 
 
 def _fmt(out) -> str:
@@ -62,7 +62,14 @@ async def approval_node(state: dict, config: RunnableConfig) -> dict[str, Any]:
         rt._emit(
             st,
             "approval.decided",
-            {"id": p["tool_call_id"], "decision": "rejected", "tool": p["tool"], "feedback": feedback, "actor": actor},
+            {
+                "id": p["tool_call_id"],
+                "decision": "rejected",
+                "tool": p["tool"],
+                "feedback": feedback,
+                "actor": actor,
+                **present_tool(p["tool"], p.get("args") or {}),
+            },
         )
         rt._record(
             st,
@@ -149,6 +156,7 @@ async def approval_node(state: dict, config: RunnableConfig) -> dict[str, Any]:
             "args": final,
             "edited": edited,
             "actor": actor,
+            **present_tool(p["tool"], final),
         },
     )
     rt._record(

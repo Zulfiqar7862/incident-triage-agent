@@ -127,6 +127,57 @@ function ServicesView({ data }: { data: unknown }) {
   )
 }
 
+const SEVERITY_WORDS: Record<string, string> = {
+  P1: 'Critical',
+  P2: 'High',
+  P3: 'Medium',
+  P4: 'Low',
+  SEV1: 'Critical',
+  SEV2: 'High',
+  SEV3: 'Medium',
+  SEV4: 'Low',
+  CRITICAL: 'Critical',
+  HIGH: 'High',
+  MEDIUM: 'Medium',
+  LOW: 'Low',
+}
+
+function severityWords(raw: unknown): string {
+  const s = String(raw ?? '').trim()
+  if (!s) return 'Unknown'
+  return SEVERITY_WORDS[s.toUpperCase()] || SEVERITY_WORDS[s] || s
+}
+
+/** Operator-facing alert card — never show ALRT-* ids or P-codes. */
+function AlertResultView({ data }: { data: Record<string, unknown> }) {
+  const title = String(data.title || 'Alert')
+  const service = data.service != null ? String(data.service) : null
+  const severity = severityWords(data.severity)
+  const status = data.status != null ? String(data.status) : null
+  const fired = data.fired_at != null ? formatScalar(data.fired_at, 'fired_at') : null
+  return (
+    <div className="space-y-3" data-testid="tool-alert">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="rounded-full bg-[var(--color-danger-soft)] px-2.5 py-0.5 text-[11px] font-semibold text-[var(--color-danger)]">
+          {severity}
+        </span>
+        {service ? (
+          <span className="rounded-full bg-[var(--color-muted)] px-2.5 py-0.5 text-[11px] font-medium text-[var(--color-fg-secondary)]">
+            {service}
+          </span>
+        ) : null}
+        {status ? (
+          <span className="rounded-full bg-[var(--color-muted)] px-2.5 py-0.5 text-[11px] font-medium text-[var(--color-fg-secondary)]">
+            {status}
+          </span>
+        ) : null}
+      </div>
+      <p className="m-0 text-sm font-semibold leading-snug">{title}</p>
+      {fired ? <p className="m-0 text-xs text-[var(--color-fg-tertiary)]">Fired {fired}</p> : null}
+    </div>
+  )
+}
+
 export function ToolArgsView({ args }: { args: Record<string, unknown> }) {
   const entries = Object.entries(args || {})
   if (!entries.length) return <p className="m-0 text-sm text-[var(--color-fg-tertiary)]">No arguments</p>
@@ -186,7 +237,15 @@ export function ToolOutputView({
       </>
     )
   }
-  if (toolName === 'list_services' || toolName === 'describe_service' || toolName === 'get_alert') {
+  if (toolName === 'get_alert' && isObj(parsed)) {
+    return (
+      <>
+        <AlertResultView data={parsed} />
+        <TechnicalDetails data={parsed} />
+      </>
+    )
+  }
+  if (toolName === 'list_services' || toolName === 'describe_service') {
     return (
       <>
         <ServicesView data={parsed} />

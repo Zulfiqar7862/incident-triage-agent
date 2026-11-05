@@ -1,6 +1,7 @@
 # Operator walkthrough
 
-End-to-end tour of the React operator console in **demo mode** (no API key required). Recording: [`screenshots/walkthrough.mp4`](screenshots/walkthrough.mp4). Recreate with:
+
+End-to-end tour of the React operator console in **offline / scripted provider** (no API key required). Recording: [`screenshots/walkthrough.mp4`](screenshots/walkthrough.mp4). Recreate with:
 
 ```bash
 make frontend

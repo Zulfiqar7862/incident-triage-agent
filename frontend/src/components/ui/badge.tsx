@@ -1,5 +1,4 @@
 import { cn } from '@/lib/utils'
-import { statusLabel } from '@/lib/humanize'
 import type { RunStatus } from '@/lib/types'
 
 const tone: Record<string, string> = {
@@ -28,8 +27,31 @@ const dot: Record<string, string> = {
   cancelled: 'bg-[var(--color-danger)]',
 }
 
-export function StatusBadge({ status, className }: { status: RunStatus | string; className?: string }) {
+/** Fallback only when API omits status_label (should be rare). */
+const FALLBACK: Record<string, string> = {
+  queued: 'Queued',
+  running: 'Investigating',
+  awaiting_approval: 'Needs your approval',
+  awaiting_input: 'Needs your answer',
+  paused: 'Paused',
+  interrupted: 'Interrupted',
+  needs_attention: 'Needs attention',
+  completed: 'Finished',
+  failed: 'Failed',
+  cancelled: 'Stopped',
+}
+
+export function StatusBadge({
+  status,
+  label,
+  className,
+}: {
+  status: RunStatus | string
+  label?: string
+  className?: string
+}) {
   const s = String(status)
+  const text = label || FALLBACK[s] || s.replaceAll('_', ' ')
   return (
     <span
       className={cn(
@@ -39,7 +61,7 @@ export function StatusBadge({ status, className }: { status: RunStatus | string;
       )}
     >
       <span className={cn('inline-block size-1.5 rounded-full', dot[s] || 'bg-[var(--color-fg-tertiary)]')} />
-      {statusLabel(s)}
+      {text}
     </span>
   )
 }

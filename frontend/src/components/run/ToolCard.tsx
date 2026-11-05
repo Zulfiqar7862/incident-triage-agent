@@ -3,7 +3,6 @@ import { useState } from 'react'
 import { toast } from 'sonner'
 import { TechnicalDetails } from '@/components/common/DataView'
 import { ToolArgsView, ToolOutputView } from '@/components/common/ToolOutputView'
-import { describeTool } from '@/lib/humanize'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
@@ -12,6 +11,10 @@ export type ToolCardModel = {
   name: string
   args: Record<string, unknown>
   kind?: string
+  /** Backend present_tool fields */
+  title?: string
+  summary?: string
+  risk?: string
   status: 'running' | 'ok' | 'error' | 'waiting'
   content?: string
   duration_ms?: number
@@ -42,7 +45,7 @@ export function ToolCard({ tool }: { tool: ToolCardModel }) {
     )
 
   const tag = statusTag(tool)
-  const title = describeTool(tool.name, tool.args)
+  const headline = tool.summary || tool.title || tool.name.replaceAll('_', ' ')
 
   const copy = async (text: string, label: string) => {
     try {
@@ -57,24 +60,26 @@ export function ToolCard({ tool }: { tool: ToolCardModel }) {
     <div
       className={cn(
         'overflow-hidden rounded-[12px] border bg-[var(--color-elevated)] shadow-sm',
-        tool.kind === 'write' ? 'border-[var(--color-warning-border)]' : 'border-[var(--color-border)]',
+        tool.kind === 'write' || tool.risk === 'high'
+          ? 'border-[var(--color-warning-border)]'
+          : 'border-[var(--color-border)]',
         tool.status === 'error' && 'border-[var(--color-danger)]/40',
       )}
       data-testid="tool-card"
     >
       <button
         type="button"
-        className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-[13px] hover:bg-[var(--color-subtle)]"
+        className="flex w-full items-start gap-2.5 px-3.5 py-2.5 text-left text-[13px] hover:bg-[var(--color-subtle)]"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
       >
-        {statusIcon}
-        <span className="min-w-0 flex-1 truncate font-semibold tracking-tight" title={title}>
-          {title}
+        <span className="mt-0.5 shrink-0">{statusIcon}</span>
+        <span className="min-w-0 flex-1 whitespace-normal break-words font-semibold leading-snug tracking-tight" title={headline}>
+          {headline}
         </span>
         <span
           className={cn(
-            'rounded-full px-2 py-0.5 text-[11px] font-semibold',
+            'shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold',
             tool.status === 'ok' && 'bg-[var(--color-success-soft)] text-[var(--color-success)]',
             tool.status === 'error' && 'bg-[var(--color-danger-soft)] text-[var(--color-danger)]',
             tool.status === 'waiting' && 'bg-[var(--color-warning-soft)] text-[var(--color-warning)]',
@@ -83,7 +88,7 @@ export function ToolCard({ tool }: { tool: ToolCardModel }) {
         >
           {tag}
         </span>
-        <ChevronDown className={cn('size-4 text-[var(--color-fg-tertiary)] transition-transform', open && 'rotate-180')} />
+        <ChevronDown className={cn('mt-0.5 size-4 shrink-0 text-[var(--color-fg-tertiary)] transition-transform', open && 'rotate-180')} />
       </button>
       {tool.retryNote ? <div className="px-3.5 pb-2 text-xs text-[var(--color-warning)]">{tool.retryNote}</div> : null}
       {open ? (
@@ -91,11 +96,7 @@ export function ToolCard({ tool }: { tool: ToolCardModel }) {
           <div>
             <div className="mb-1.5 flex items-center justify-between">
               <span className="text-xs font-semibold uppercase tracking-wide text-[var(--color-fg-tertiary)]">Inputs</span>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => copy(JSON.stringify(tool.args, null, 2), 'Inputs')}
-              >
+              <Button size="sm" variant="ghost" onClick={() => copy(JSON.stringify(tool.args, null, 2), 'Inputs')}>
                 <Copy className="size-3.5" /> Copy
               </Button>
             </div>

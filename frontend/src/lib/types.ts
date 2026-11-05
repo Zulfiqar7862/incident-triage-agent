@@ -54,6 +54,10 @@ export interface PendingApproval {
   step: number
   requested_at?: number
   executing?: boolean
+  /** Backend display helpers (app/tools/display.py) */
+  title?: string
+  summary?: string
+  risk?: 'high' | 'low' | string
 }
 
 export interface PendingInput {
@@ -63,6 +67,19 @@ export interface PendingInput {
   args: Record<string, unknown>
   question: string
   step: number
+  title?: string
+  summary?: string
+  risk?: string
+}
+
+export interface AlertCard {
+  title: string
+  summary: string
+  service: string
+  severity: string
+  severity_code?: string
+  fired_min_ago?: number
+  fired_at?: number
 }
 
 export type Pending = PendingApproval | PendingInput | null
@@ -93,6 +110,7 @@ export interface RunDetail {
   title: string
   task: string
   status: RunStatus
+  status_label?: string
   status_reason?: string
   active: boolean
   step: number
@@ -107,6 +125,7 @@ export interface RunDetail {
   last_context?: ContextStats
   recalled_memories?: Array<{ date: string; age_days: number; root_cause: string }>
   service?: string
+  alert?: AlertCard
 }
 
 export interface AgentEvent {

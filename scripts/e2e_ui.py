@@ -82,6 +82,12 @@ def main() -> int:
                 raise RuntimeError(f"function-call text visible in UI: {re.search(r'\b\w+_\w+\(', combined).group(0)}")
             if re.search(r"\brun-[a-z0-9]+\b", combined, re.I):
                 raise RuntimeError("raw run id visible in default UI")
+            if "Demo mode" in combined:
+                raise RuntimeError("demo wording visible in UI")
+            if re.search(r"\bALRT-\d+", combined):
+                raise RuntimeError("raw alert id visible in UI")
+            if re.search(r"\bP[1-4]\b", combined):
+                raise RuntimeError("P-code severity jargon visible in UI")
             # Collapsed technical details should not be open
             assert page.locator('[data-testid="technical-details"]:visible').count() == 0
             page.click("#apOk")
