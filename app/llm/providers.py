@@ -10,6 +10,7 @@ data that must be sent back verbatim (Gemini thought signatures).
 Plain httpx keeps the dependency surface small and every request easy to read.
 Every adapter accepts an httpx transport so tests can run against a mocked API.
 """
+
 from __future__ import annotations
 
 import json
@@ -163,32 +164,45 @@ def from_gemini(data: dict, model: str) -> LLMResponse:
         raise LLMError(f"Gemini stopped the response (finishReason={finish})")
     if finish == "MALFORMED_FUNCTION_CALL" and not calls:
         # The runtime nudges the model to try again when a turn has no tool calls.
-        text = (text + "\n" if text else "") + "(The previous function call was malformed; please retry it with valid JSON arguments.)"
+        text = (
+            text + "\n" if text else ""
+        ) + "(The previous function call was malformed; please retry it with valid JSON arguments.)"
     usage = data.get("usageMetadata") or {}
     out_tokens = usage.get("candidatesTokenCount", 0) + usage.get("thoughtsTokenCount", 0)
     raw = {"provider": "gemini", "parts": [p for p in parts if not p.get("thought")]} if parts else None
-    return LLMResponse(text, calls, usage.get("promptTokenCount", 0), out_tokens,
-                       data.get("modelVersion", model), raw)
+    return LLMResponse(text, calls, usage.get("promptTokenCount", 0), out_tokens, data.get("modelVersion", model), raw)
 
 
 class GeminiLLM:
     provider = "gemini"
 
-    def __init__(self, model: str, api_key: str, timeout: float, max_output_tokens: int = 8192,
-                 transport: httpx.AsyncBaseTransport | None = None):
+    def __init__(
+        self,
+        model: str,
+        api_key: str,
+        timeout: float,
+        max_output_tokens: int = 8192,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ):
         self.model = model
         self.max_output_tokens = max_output_tokens
         self._headers = {"x-goog-api-key": api_key, "content-type": "application/json"}
         self._client = _client(timeout, transport)
 
-    async def complete(self, system: str, messages: list[dict], tools: list[dict], state: dict | None = None) -> LLMResponse:
+    async def complete(
+        self, system: str, messages: list[dict], tools: list[dict], state: dict | None = None
+    ) -> LLMResponse:
         payload = {
             "systemInstruction": {"parts": [{"text": system}]},
             "contents": to_gemini(messages),
-            "tools": [{"functionDeclarations": [
-                {"name": t["name"], "description": t["description"], "parametersJsonSchema": t["input_schema"]}
-                for t in tools
-            ]}],
+            "tools": [
+                {
+                    "functionDeclarations": [
+                        {"name": t["name"], "description": t["description"], "parametersJsonSchema": t["input_schema"]}
+                        for t in tools
+                    ]
+                }
+            ],
             "toolConfig": {"functionCallingConfig": {"mode": "AUTO"}},
             "generationConfig": {"maxOutputTokens": self.max_output_tokens},
         }
@@ -211,10 +225,23 @@ def to_anthropic(messages: list[dict]) -> list[dict]:
             push("user", [{"type": "text", "text": m["content"]}])
         elif m["role"] == "assistant":
             blocks = [{"type": "text", "text": m["text"]}] if m.get("text") else []
-            blocks += [{"type": "tool_use", "id": c["id"], "name": c["name"], "input": c["args"]} for c in m.get("tool_calls", [])]
+            blocks += [
+                {"type": "tool_use", "id": c["id"], "name": c["name"], "input": c["args"]}
+                for c in m.get("tool_calls", [])
+            ]
             push("assistant", blocks or [{"type": "text", "text": "(no output)"}])
         elif m["role"] == "tool":
-            push("user", [{"type": "tool_result", "tool_use_id": m["tool_call_id"], "content": m["content"], "is_error": bool(m.get("is_error"))}])
+            push(
+                "user",
+                [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": m["tool_call_id"],
+                        "content": m["content"],
+                        "is_error": bool(m.get("is_error")),
+                    }
+                ],
+            )
     for msg in out:  # tool_result blocks must come before text in a user turn
         if msg["role"] == "user":
             msg["content"].sort(key=lambda b: 0 if b["type"] == "tool_result" else 1)
@@ -224,27 +251,39 @@ def to_anthropic(messages: list[dict]) -> list[dict]:
 class AnthropicLLM:
     provider = "anthropic"
 
-    def __init__(self, model: str, api_key: str, timeout: float, max_output_tokens: int = 8192,
-                 transport: httpx.AsyncBaseTransport | None = None):
+    def __init__(
+        self,
+        model: str,
+        api_key: str,
+        timeout: float,
+        max_output_tokens: int = 8192,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ):
         self.model = model
         self.max_output_tokens = max_output_tokens
         self._headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
         self._client = _client(timeout, transport)
 
-    async def complete(self, system: str, messages: list[dict], tools: list[dict], state: dict | None = None) -> LLMResponse:
+    async def complete(
+        self, system: str, messages: list[dict], tools: list[dict], state: dict | None = None
+    ) -> LLMResponse:
         payload = {
             "model": self.model,
             "max_tokens": self.max_output_tokens,
             "system": system,
             "messages": to_anthropic(messages),
-            "tools": [{"name": t["name"], "description": t["description"], "input_schema": t["input_schema"]} for t in tools],
+            "tools": [
+                {"name": t["name"], "description": t["description"], "input_schema": t["input_schema"]} for t in tools
+            ],
         }
         data = await _post(self._client, "https://api.anthropic.com/v1/messages", self._headers, payload)
         blocks = data.get("content", [])
         text = "\n".join(b["text"] for b in blocks if b.get("type") == "text").strip()
         calls = [ToolCall(b["id"], b["name"], b.get("input") or {}) for b in blocks if b.get("type") == "tool_use"]
         usage = data.get("usage", {})
-        return LLMResponse(text, calls, usage.get("input_tokens", 0), usage.get("output_tokens", 0), data.get("model", self.model))
+        return LLMResponse(
+            text, calls, usage.get("input_tokens", 0), usage.get("output_tokens", 0), data.get("model", self.model)
+        )
 
 
 # ---- OpenAI ------------------------------------------------------------------------------------
@@ -257,7 +296,11 @@ def to_openai(messages: list[dict]) -> list[dict]:
             msg = {"role": "assistant", "content": m.get("text") or None}
             if m.get("tool_calls"):
                 msg["tool_calls"] = [
-                    {"id": c["id"], "type": "function", "function": {"name": c["name"], "arguments": json.dumps(c["args"])}}
+                    {
+                        "id": c["id"],
+                        "type": "function",
+                        "function": {"name": c["name"], "arguments": json.dumps(c["args"])},
+                    }
                     for c in m["tool_calls"]
                 ]
             out.append(msg)
@@ -269,19 +312,33 @@ def to_openai(messages: list[dict]) -> list[dict]:
 class OpenAILLM:
     provider = "openai"
 
-    def __init__(self, model: str, api_key: str, timeout: float, max_output_tokens: int = 8192,
-                 transport: httpx.AsyncBaseTransport | None = None):
+    def __init__(
+        self,
+        model: str,
+        api_key: str,
+        timeout: float,
+        max_output_tokens: int = 8192,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ):
         self.model = model
         self.max_output_tokens = max_output_tokens
         self._headers = {"Authorization": f"Bearer {api_key}", "content-type": "application/json"}
         self._client = _client(timeout, transport)
 
-    async def complete(self, system: str, messages: list[dict], tools: list[dict], state: dict | None = None) -> LLMResponse:
+    async def complete(
+        self, system: str, messages: list[dict], tools: list[dict], state: dict | None = None
+    ) -> LLMResponse:
         payload = {
             "model": self.model,
             "max_tokens": self.max_output_tokens,
             "messages": [{"role": "system", "content": system}] + to_openai(messages),
-            "tools": [{"type": "function", "function": {"name": t["name"], "description": t["description"], "parameters": t["input_schema"]}} for t in tools],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {"name": t["name"], "description": t["description"], "parameters": t["input_schema"]},
+                }
+                for t in tools
+            ],
         }
         data = await _post(self._client, "https://api.openai.com/v1/chat/completions", self._headers, payload)
         msg = data["choices"][0]["message"]
@@ -294,9 +351,13 @@ class OpenAILLM:
                 args = {"_unparseable_arguments": raw}  # validation fails; the agent sees the error and retries
             calls.append(ToolCall(tc["id"], tc["function"]["name"], args))
         usage = data.get("usage", {})
-        return LLMResponse((msg.get("content") or "").strip(), calls, usage.get("prompt_tokens", 0),
-                           usage.get("completion_tokens", 0), data.get("model", self.model))
-
+        return LLMResponse(
+            (msg.get("content") or "").strip(),
+            calls,
+            usage.get("prompt_tokens", 0),
+            usage.get("completion_tokens", 0),
+            data.get("model", self.model),
+        )
 
 
 class GeminiWithFallback:
@@ -324,7 +385,9 @@ class GeminiWithFallback:
     def _client(self):
         return self._active._client
 
-    async def complete(self, system: str, messages: list[dict], tools: list[dict], state: dict | None = None) -> LLMResponse:
+    async def complete(
+        self, system: str, messages: list[dict], tools: list[dict], state: dict | None = None
+    ) -> LLMResponse:
         try:
             return await self._active.complete(system, messages, tools, state)
         except LLMTransientError as e:
@@ -335,6 +398,7 @@ class GeminiWithFallback:
                 and self._is_quota(e)
             ):
                 import logging
+
                 logging.getLogger("llm").warning(
                     "gemini primary model %s hit quota/429; falling back to %s",
                     self._primary.model,
@@ -368,7 +432,9 @@ def resolve_provider(settings: Settings) -> str:
         else:
             provider = "scripted"
     if provider == "scripted" and settings.require_llm:
-        raise ConfigError("REQUIRE_LLM is true but no model is configured. Set GEMINI_API_KEY (or another provider's key).")
+        raise ConfigError(
+            "REQUIRE_LLM is true but no model is configured. Set GEMINI_API_KEY (or another provider's key)."
+        )
     return provider
 
 
@@ -378,7 +444,9 @@ def make_llm(settings: Settings, transport: httpx.AsyncBaseTransport | None = No
         key = _gemini_key()
         if not key:
             raise ConfigError("LLM_PROVIDER=gemini but GEMINI_API_KEY is not set")
-        primary = GeminiLLM(settings.gemini_model, key, settings.llm_timeout_s, settings.llm_max_output_tokens, transport)
+        primary = GeminiLLM(
+            settings.gemini_model, key, settings.llm_timeout_s, settings.llm_max_output_tokens, transport
+        )
         fb_name = (settings.gemini_fallback_model or "").strip()
         if fb_name and fb_name != settings.gemini_model:
             fallback = GeminiLLM(fb_name, key, settings.llm_timeout_s, settings.llm_max_output_tokens, transport)
@@ -387,11 +455,23 @@ def make_llm(settings: Settings, transport: httpx.AsyncBaseTransport | None = No
     if provider == "anthropic":
         if not os.getenv("ANTHROPIC_API_KEY"):
             raise ConfigError("LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY is not set")
-        return AnthropicLLM(settings.anthropic_model, os.environ["ANTHROPIC_API_KEY"], settings.llm_timeout_s, settings.llm_max_output_tokens, transport)
+        return AnthropicLLM(
+            settings.anthropic_model,
+            os.environ["ANTHROPIC_API_KEY"],
+            settings.llm_timeout_s,
+            settings.llm_max_output_tokens,
+            transport,
+        )
     if provider == "openai":
         if not os.getenv("OPENAI_API_KEY"):
             raise ConfigError("LLM_PROVIDER=openai but OPENAI_API_KEY is not set")
-        return OpenAILLM(settings.openai_model, os.environ["OPENAI_API_KEY"], settings.llm_timeout_s, settings.llm_max_output_tokens, transport)
+        return OpenAILLM(
+            settings.openai_model,
+            os.environ["OPENAI_API_KEY"],
+            settings.llm_timeout_s,
+            settings.llm_max_output_tokens,
+            transport,
+        )
     from app.scripted import ScriptedPolicy
 
     return ScriptedPolicy(delay_s=settings.scripted_delay_s)

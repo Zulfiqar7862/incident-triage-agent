@@ -1,3 +1,21 @@
+/** API-owned prose and scalar fields. Canonical model/evidence strings are never display fallbacks. */
+export interface OperatorDisplay {
+  state?: 'applied' | 'rejected' | 'unverified' | 'failed'
+  title: string
+  summary: string
+  fields: Array<{ label: string; value: string }>
+  evidence: string[]
+  impact: string
+}
+export interface OperatorRun {
+  title: string
+  summary: string
+  status: string
+  evidence: string[]
+  plan: string[]
+  report: OperatorDisplay | null
+}
+
 export type RunStatus =
   | 'queued'
   | 'running'
@@ -47,6 +65,7 @@ export interface Hypothesis {
 }
 
 export interface PendingApproval {
+  operator?: OperatorDisplay
   kind: 'approval'
   tool_call_id: string
   tool: string
@@ -61,6 +80,7 @@ export interface PendingApproval {
 }
 
 export interface PendingInput {
+  operator?: OperatorDisplay
   kind: 'input'
   tool_call_id: string
   tool: string
@@ -85,9 +105,12 @@ export interface AlertCard {
 export type Pending = PendingApproval | PendingInput | null
 
 export interface RunResult {
+  operator?: OperatorDisplay
   resolved: boolean
   summary: string
   root_cause: string
+  operator_summary?: string
+  fix_summary?: string
   fix_applied?: string
   follow_ups?: string[]
   sim_resolved?: boolean
@@ -105,6 +128,7 @@ export interface ContextStats {
 }
 
 export interface RunDetail {
+  operator?: OperatorRun
   run_id: string
   scenario_id: string
   title: string
@@ -129,6 +153,7 @@ export interface RunDetail {
 }
 
 export interface AgentEvent {
+  operator?: OperatorDisplay | null
   seq: number
   run_id: string
   type: string

@@ -7,6 +7,7 @@ Writes docs/E2E_RESULTS.md. Never prints or logs the API key.
 Skipped when GEMINI_API_KEY is unset. Prefer GEMINI_MODEL=gemini-3.5-flash-lite
 for free-tier reliability; the app also falls back automatically on 429.
 """
+
 from __future__ import annotations
 
 import json
@@ -51,7 +52,6 @@ def _raise_for_status(r: httpx.Response) -> None:
         request=r.request,
         response=r,
     )
-
 
 
 def _approve(client: httpx.Client, rid: str) -> httpx.Response:
@@ -136,13 +136,15 @@ def run_happy_path(client: httpx.Client, scenario_id: str, model: str) -> dict:
         _approve(client, rid)
         # Leave the current gate (running) or reach a terminal / new gate.
         st = _wait_status(
-            client, rid,
+            client,
+            rid,
             {"completed", "failed", "needs_attention", "running"},
             timeout=240,
         )
         if st["status"] == "running":
             st = _wait_status(
-                client, rid,
+                client,
+                rid,
                 {"completed", "failed", "needs_attention", "awaiting_approval"},
                 timeout=240,
             )
@@ -154,7 +156,9 @@ def run_happy_path(client: httpx.Client, scenario_id: str, model: str) -> dict:
                 _approve(client, rid)
                 st = _wait_status(client, rid, {"completed", "failed", "needs_attention", "running"}, timeout=240)
                 if st["status"] == "running":
-                    st = _wait_status(client, rid, {"completed", "failed", "needs_attention", "awaiting_approval"}, timeout=240)
+                    st = _wait_status(
+                        client, rid, {"completed", "failed", "needs_attention", "awaiting_approval"}, timeout=240
+                    )
                     if st["status"] == "awaiting_approval":
                         _approve(client, rid)
                         st = _wait_status(client, rid, {"completed", "failed", "needs_attention"}, timeout=240)
@@ -311,7 +315,8 @@ def run_resume_after_restart(env: dict, port: int, model: str) -> dict:
                 "sim_resolved": bool(result.get("sim_resolved")),
                 "fix": result.get("fix_applied"),
                 "steps": st.get("step"),
-                "tokens": (st.get("usage") or {}).get("input_tokens", 0) + (st.get("usage") or {}).get("output_tokens", 0),
+                "tokens": (st.get("usage") or {}).get("input_tokens", 0)
+                + (st.get("usage") or {}).get("output_tokens", 0),
                 "cost_usd": round((st.get("usage") or {}).get("cost_usd", 0), 4),
                 "seconds": round(time.time() - t0, 1),
                 "evidence": {"run_id": rid, "post_restart_status_path": "interrupted|awaiting_approval → completed"},
@@ -427,22 +432,42 @@ def main() -> int:
                 except Exception as e:  # noqa: BLE001
                     print(f"  ! {sid} exception: {type(e).__name__}: {e}", flush=True)
                     row = {
-                        "scenario": sid, "model": live_model, "pass": False, "status": "error",
-                        "resolved": False, "sim_resolved": False, "fix": None, "steps": 0,
-                        "tokens": 0, "cost_usd": 0, "seconds": 0,
-                        "evidence": {"error": f"{type(e).__name__}: {e}"[:240]}, "summary": str(e)[:180],
+                        "scenario": sid,
+                        "model": live_model,
+                        "pass": False,
+                        "status": "error",
+                        "resolved": False,
+                        "sim_resolved": False,
+                        "fix": None,
+                        "steps": 0,
+                        "tokens": 0,
+                        "cost_usd": 0,
+                        "seconds": 0,
+                        "evidence": {"error": f"{type(e).__name__}: {e}"[:240]},
+                        "summary": str(e)[:180],
                     }
                 rows.append(row)
-                print(f"  {sid}: {'PASS' if row['pass'] else 'FAIL'} status={row['status']} {row['seconds']}s", flush=True)
+                print(
+                    f"  {sid}: {'PASS' if row['pass'] else 'FAIL'} status={row['status']} {row['seconds']}s", flush=True
+                )
                 time.sleep(3)
             try:
                 row = run_reject_path(client, live_model)
             except Exception as e:  # noqa: BLE001
                 row = {
-                    "scenario": "approval-rejected", "model": live_model, "pass": False, "status": "error",
-                    "resolved": False, "sim_resolved": False, "fix": None, "steps": 0,
-                    "tokens": 0, "cost_usd": 0, "seconds": 0,
-                    "evidence": {"error": str(e)[:200]}, "summary": str(e)[:180],
+                    "scenario": "approval-rejected",
+                    "model": live_model,
+                    "pass": False,
+                    "status": "error",
+                    "resolved": False,
+                    "sim_resolved": False,
+                    "fix": None,
+                    "steps": 0,
+                    "tokens": 0,
+                    "cost_usd": 0,
+                    "seconds": 0,
+                    "evidence": {"error": str(e)[:200]},
+                    "summary": str(e)[:180],
                 }
             rows.append(row)
             print(f"  reject: {'PASS' if row['pass'] else 'FAIL'}", flush=True)
@@ -452,10 +477,19 @@ def main() -> int:
             row = run_resume_after_restart(env, port + 1, live_model)
         except Exception as e:  # noqa: BLE001
             row = {
-                "scenario": "resume-after-restart", "model": live_model, "pass": False, "status": "error",
-                "resolved": False, "sim_resolved": False, "fix": None, "steps": 0,
-                "tokens": 0, "cost_usd": 0, "seconds": 0,
-                "evidence": {"error": str(e)[:200]}, "summary": str(e)[:180],
+                "scenario": "resume-after-restart",
+                "model": live_model,
+                "pass": False,
+                "status": "error",
+                "resolved": False,
+                "sim_resolved": False,
+                "fix": None,
+                "steps": 0,
+                "tokens": 0,
+                "cost_usd": 0,
+                "seconds": 0,
+                "evidence": {"error": str(e)[:200]},
+                "summary": str(e)[:180],
             }
         rows.append(row)
         print(f"  resume: {'PASS' if row['pass'] else 'FAIL'}", flush=True)
@@ -469,14 +503,19 @@ def main() -> int:
     # Offline counts
     offline = {}
     try:
-        p = subprocess.run([sys.executable, "-m", "pytest", "-q", "--tb=no"], cwd=ROOT, capture_output=True, text=True, timeout=120)
+        p = subprocess.run(
+            [sys.executable, "-m", "pytest", "-q", "--tb=no"], cwd=ROOT, capture_output=True, text=True, timeout=120
+        )
         offline["pytest"] = (p.stdout.strip().splitlines() or [""])[-1]
     except Exception as e:  # noqa: BLE001
         offline["pytest"] = str(e)
     try:
         e = subprocess.run(
             [sys.executable, "-m", "evals.run_evals", "--provider", "scripted"],
-            cwd=ROOT, capture_output=True, text=True, timeout=180,
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=180,
             env={**os.environ, "TOOL_BACKOFF_S": "0.01", "LLM_PROVIDER": "scripted", "REQUIRE_LLM": "false"},
         )
         # last non-empty line

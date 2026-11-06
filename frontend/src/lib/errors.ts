@@ -43,10 +43,17 @@ function isNetwork(err: unknown): boolean {
 }
 
 /** Map API / SSE / agent errors to short operator-facing copy. */
-export function mapError(err: unknown, context?: { runFailed?: boolean; sse?: boolean }): FriendlyError {
+function fallbackError(
+  err: unknown,
+  context?: { runFailed?: boolean; sse?: boolean },
+): FriendlyError {
   const technical = detailText(err)
 
-  if (context?.sse || technical.toLowerCase().includes('sse') || technical.toLowerCase().includes('eventsource')) {
+  if (
+    context?.sse ||
+    technical.toLowerCase().includes('sse') ||
+    technical.toLowerCase().includes('eventsource')
+  ) {
     return {
       kind: 'sse',
       title: 'Live updates paused',
@@ -93,17 +100,17 @@ export function mapError(err: unknown, context?: { runFailed?: boolean; sse?: bo
         return {
           kind: 'conflict',
           title: 'Already handled',
-          explanation: 'Someone else already approved or rejected this change, or the checkpoint moved on.',
+          explanation: 'The decision was already handled, or the investigation has moved on.',
           nextStep: 'Refresh the run to see the latest state.',
           actionLabel: 'Refresh',
           technical,
         }
       case 422: {
-        const fields = formatValidation(err.message)
         return {
           kind: 'validation',
           title: 'That input looks off',
-          explanation: fields || 'One or more fields could not be accepted.',
+          explanation:
+            'One or more fields could not be accepted. Review your entries and try again.',
           nextStep: 'Fix the highlighted fields and try again.',
           actionLabel: 'Retry',
           technical,
@@ -114,7 +121,8 @@ export function mapError(err: unknown, context?: { runFailed?: boolean; sse?: bo
           kind: 'rate_limit',
           title: 'Model is rate-limited',
           explanation: 'The language model provider asked us to slow down.',
-          nextStep: 'Wait a moment, then resume the run. A fallback model may be used automatically.',
+          nextStep:
+            'Wait a moment, then resume the run. A fallback model may be used automatically.',
           actionLabel: 'Retry',
           technical,
         }
@@ -153,21 +161,6 @@ export function mapError(err: unknown, context?: { runFailed?: boolean; sse?: bo
   }
 }
 
-function formatValidation(raw: string): string {
-  // Turn "field: msg; other: msg" into plain sentences.
-  if (!raw || raw.length > 280) return raw.slice(0, 280)
-  return raw
-    .split(';')
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .map((part) => {
-      const [loc, ...rest] = part.split(':')
-      if (!rest.length) return humanizeKey(part)
-      return `${humanizeKey(loc.trim())}: ${rest.join(':').trim()}`
-    })
-    .join('. ')
-}
-
 export function humanizeKey(key: string): string {
   return key
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
@@ -180,4 +173,15 @@ export function humanizeKey(key: string): string {
 export function toastFriendlyError(err: unknown, toastFn: (msg: string) => void) {
   const f = mapError(err)
   toastFn(`${f.title} — ${f.explanation}`)
+}
+
+/** Prefer the API-owned error projection; legacy/transport failures use safe static copy. */
+export function mapError(
+  err: unknown,
+  context?: { runFailed?: boolean; sse?: boolean },
+): FriendlyError {
+  const friendly = fallbackError(err, context)
+  if (err instanceof ApiError && err.operator)
+    return { ...friendly, title: err.operator.title, explanation: err.operator.summary }
+  return friendly
 }

@@ -1,4 +1,5 @@
 """Alembic env — supports async SQLAlchemy URLs from DATABASE_URL / Settings."""
+
 from __future__ import annotations
 
 import asyncio

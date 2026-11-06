@@ -7,6 +7,7 @@ production adapter and tool schemas; no runs are created and nothing is changed.
 
     python -m scripts.check_llm
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -19,8 +20,13 @@ from app.context import SYSTEM_PROMPT
 from app.llm import LLMError, LLMTransientError, make_llm
 from app.tools import tool_schemas
 
-ALERT = {"id": "ALRT-0001", "service": "checkout-service", "severity": "P1", "status": "firing",
-         "title": "checkout-service 5xx error rate above 5%"}
+ALERT = {
+    "id": "ALRT-0001",
+    "service": "checkout-service",
+    "severity": "P1",
+    "status": "firing",
+    "title": "checkout-service 5xx error rate above 5%",
+}
 
 
 async def main() -> int:
@@ -47,14 +53,25 @@ async def main() -> int:
             return 1
         print(f"  step 1 ok: called {names} ({ms1} ms, {r1.input_tokens} in / {r1.output_tokens} out)")
 
-        assistant = {"role": "assistant", "text": r1.text, "tool_calls": [{"id": c.id, "name": c.name, "args": c.args} for c in r1.tool_calls]}
+        assistant = {
+            "role": "assistant",
+            "text": r1.text,
+            "tool_calls": [{"id": c.id, "name": c.name, "args": c.args} for c in r1.tool_calls],
+        }
         if r1.raw:
             assistant["raw"] = r1.raw
         messages.append(assistant)
         for c in r1.tool_calls:
             content = json.dumps(ALERT) if c.name == "get_alert" else "Not needed for this check."
-            messages.append({"role": "tool", "tool_call_id": c.id, "name": c.name, "content": content, "is_error": False})
-        messages.append({"role": "user", "content": "Good. Now call finish with resolved=false, summary 'connectivity check', root_cause 'n/a'."})
+            messages.append(
+                {"role": "tool", "tool_call_id": c.id, "name": c.name, "content": content, "is_error": False}
+            )
+        messages.append(
+            {
+                "role": "user",
+                "content": "Good. Now call finish with resolved=false, summary 'connectivity check', root_cause 'n/a'.",
+            }
+        )
 
         t0 = time.perf_counter()
         r2 = await llm.complete(SYSTEM_PROMPT, messages, tools)

@@ -1,4 +1,5 @@
 """Headless Playwright: full offline scenario including approval; fail on JS console errors."""
+
 from __future__ import annotations
 
 import os
@@ -53,13 +54,31 @@ def main() -> int:
             raise RuntimeError("server failed to start")
 
         errors: list[str] = []
+        warnings: list[str] = []
+
+        def run_state(page):
+            rid = page.url.rsplit("/", 1)[-1]
+            return httpx.get(f"{base}/api/runs/{rid}", timeout=5).json()
+
+        def wait_status(page, expected):
+            for _ in range(300):
+                st = run_state(page)
+                if st["status"] in expected:
+                    return st
+                time.sleep(0.05)
+            raise AssertionError(f"expected {expected}, got {st['status']}")
+
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             page = browser.new_page(viewport={"width": 1440, "height": 900})
             page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
             page.on("pageerror", lambda exc: errors.append(str(exc)))
+            page.on("console", lambda m: warnings.append(m.text) if m.type == "warning" else None)
             page.goto(base + "/", wait_until="networkidle")
             page.fill("#operator", "Alex Chen")
+            assert page.locator("#operator").evaluate("el => getComputedStyle(el).outlineStyle === 'solid'")
+            page.keyboard.press("Tab")
+            assert page.locator("#scenario").evaluate("el => el === document.activeElement")
             page.wait_for_selector('[data-testid="empty-state"]')
             page.select_option("#scenario", "db-pool-regression")
             page.click("#startBtn")
@@ -88,15 +107,73 @@ def main() -> int:
                 raise RuntimeError("raw alert id visible in UI")
             if re.search(r"\bP[1-4]\b", combined):
                 raise RuntimeError("P-code severity jargon visible in UI")
+            forbidden = (
+                r"DB_POOL_SIZE|ERROR POST|/api/checkout|TimeoutError|Traceback|pool-size|checkpoint|Agent is thinking"
+            )
+            assert not re.search(forbidden, combined, re.I), "technical evidence leaked into operator view"
+            assert "Restore the previous version" in side
+            assert "Failed requests:" in combined
+            # Reload replays persisted events through the same display projection.
+            page.reload(wait_until="networkidle")
+            page.wait_for_selector('[data-testid="approval-card"]')
+            assert not re.search(forbidden, page.locator("main").inner_text(), re.I)
+            assert page.locator('[data-testid="thinking-indicator"]').count() == 0
             # Collapsed technical details should not be open
             assert page.locator('[data-testid="technical-details"]:visible').count() == 0
+            # Message + edit + approve through real operator controls.
+            page.fill("#opMsg", "Verify recovery after remediation.")
+            page.click("#opSend")
+            page.get_by_role("button", name="Edit before approving").click()
+            page.get_by_label("Reason", exact=True).fill(
+                "Evidence reviewed by operator; verify recovery after rollback."
+            )
             page.click("#apOk")
             page.wait_for_selector(".outcome", timeout=90000)
+            report_text = (
+                page.locator('[data-testid="timeline"]').inner_text()
+                + page.locator('[aria-label="Run controls and state"]').inner_text()
+            )
+            assert not re.search(r"\b\w+_\w+\(", report_text), "raw function-call syntax in resolved operator view"
+            assert not re.search(forbidden, report_text, re.I), "raw diagnostics leaked in final report"
+            rid = page.url.rsplit("/", 1)[-1]
+            events = httpx.get(f"{base}/api/runs/{rid}/events", timeout=5).json()
+            assert any(e["type"] == "approval.decided" and e["payload"].get("edited") for e in events)
+
+            # A second investigation exercises pause/resume, reject, and cancel.
+            previous = page.url
+            page.click("#startBtn")
+            page.wait_for_url(lambda url: str(url) != previous, timeout=30000)
+            page.get_by_role("button", name="Pause", exact=True).click()
+            wait_status(page, {"paused"})
+            page.get_by_role("button", name="Resume", exact=True).click()
+            page.wait_for_selector('[data-testid="approval-card"]', timeout=90000)
+            page.fill("#apFb", "Do not apply; DB_POOL_SIZE TimeoutError ERROR POST /api/checkout")
+            page.click("#apNo")
+            rid = page.url.rsplit("/", 1)[-1]
+            for _ in range(300):
+                events = httpx.get(f"{base}/api/runs/{rid}/events", timeout=5).json()
+                if any(e["type"] == "approval.decided" and e["payload"].get("decision") == "rejected" for e in events):
+                    break
+                time.sleep(0.05)
+            else:
+                raise AssertionError("rejection was not recorded")
+            wait_status(page, {"completed"})
+            page.wait_for_selector(".outcome")
+            assert not re.search(forbidden, page.locator("main").inner_text(), re.I), "raw rejection feedback leaked"
+            # Rejection can finish immediately; cancel a separate stable pending run.
+            previous = page.url
+            page.click("#startBtn")
+            page.wait_for_url(lambda url: str(url) != previous, timeout=30000)
+            page.wait_for_selector('[data-testid="approval-card"]', timeout=90000)
+            page.once("dialog", lambda dialog: dialog.accept())
+            page.get_by_role("button", name="Stop", exact=True).click()
+            wait_status(page, {"cancelled"})
+            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
             browser.close()
 
-        serious = [e for e in errors if "favicon" not in e.lower()]
-        if serious:
-            print("CONSOLE ERRORS:", serious)
+        print("CONSOLE WARNINGS:", warnings)
+        print("CONSOLE/PAGE ERRORS:", errors)
+        if errors:
             return 1
         print("e2e ui OK")
         return 0

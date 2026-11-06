@@ -1,4 +1,5 @@
 """Pull non-serializable runtime deps out of the LangGraph RunnableConfig."""
+
 from __future__ import annotations
 
 from typing import Any

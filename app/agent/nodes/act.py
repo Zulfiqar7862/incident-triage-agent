@@ -1,4 +1,5 @@
 """LLM + tool dispatch node (reads/memory/finish). Gates route to interrupt nodes."""
+
 from __future__ import annotations
 
 import asyncio
@@ -43,10 +44,7 @@ async def act_node(state: dict, config: RunnableConfig) -> dict[str, Any]:
     resp = await rt._call_llm(st, messages)
     ms = int((time.perf_counter() - t0) * 1000)
     u = st["usage"]
-    cost = (
-        resp.input_tokens * rt.settings.cost_in_per_mtok
-        + resp.output_tokens * rt.settings.cost_out_per_mtok
-    ) / 1e6
+    cost = (resp.input_tokens * rt.settings.cost_in_per_mtok + resp.output_tokens * rt.settings.cost_out_per_mtok) / 1e6
     u["llm_calls"] += 1
     u["input_tokens"] += resp.input_tokens
     u["output_tokens"] += resp.output_tokens
@@ -102,11 +100,17 @@ async def act_node(state: dict, config: RunnableConfig) -> dict[str, Any]:
     for c in calls:
         spec = TOOLS.get(c.name)
         ui = present_tool(c.name, c.args, kind=spec.kind if spec else None)
-        rt._emit(st, "tool.call", {
-            "id": c.id, "name": c.name, "args": c.args,
-            "kind": spec.kind if spec else "unknown",
-            **ui,
-        })
+        rt._emit(
+            st,
+            "tool.call",
+            {
+                "id": c.id,
+                "name": c.name,
+                "args": c.args,
+                "kind": spec.kind if spec else "unknown",
+                **ui,
+            },
+        )
 
     results: dict[str, tuple] = {}
     reads: list[tuple[ToolCall, Any]] = []

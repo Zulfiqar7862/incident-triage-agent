@@ -1,4 +1,5 @@
 """SQLAlchemy 2.0 models mirroring the Store schema (runs, events, inbox, memories)."""
+
 from __future__ import annotations
 
 from sqlalchemy import Float, Integer, String, Text

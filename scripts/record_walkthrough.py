@@ -1,4 +1,5 @@
 """Record a Playwright MP4 walkthrough of the React operator console (offline provider)."""
+
 from __future__ import annotations
 
 import os

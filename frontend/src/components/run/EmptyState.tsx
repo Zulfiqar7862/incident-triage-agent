@@ -1,31 +1,55 @@
+import { Activity, ArrowRight, ClipboardCheck, ShieldCheck, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
-export function EmptyState({ onStartScenario, busy }: { onStartScenario: () => void; busy?: boolean }) {
+export function EmptyState({
+  onStartScenario,
+  busy,
+}: {
+  onStartScenario: () => void
+  busy?: boolean
+}) {
   return (
-    <div
-      className="empty-state mx-auto my-10 max-w-[48ch] rounded-[14px] border border-dashed border-[var(--color-border)] bg-[var(--color-elevated)] px-6 py-14 text-center text-[var(--color-fg-secondary)]"
-      data-testid="empty-state"
-    >
-      <svg
-        width="72"
-        height="72"
-        viewBox="0 0 72 72"
-        fill="none"
-        className="mx-auto mb-4 opacity-90"
-        aria-hidden
-      >
-        <rect x="8" y="14" width="56" height="44" rx="8" stroke="currentColor" strokeWidth="2" />
-        <path d="M20 30h20M20 38h32M20 46h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-        <circle cx="52" cy="30" r="6" fill="var(--color-accent)" opacity="0.85" />
-      </svg>
-      <strong className="mb-1.5 block text-[15px] text-[var(--color-fg)]">Ready when you are</strong>
-      <p className="m-0 mb-4 text-sm leading-relaxed">
-        Choose a scenario and start triage. The agent&apos;s plan, tool calls, and any production change it wants to
-        make appear here as they happen — with a durable approval gate before anything mutates the cluster.
+    <div className="empty-workspace" data-testid="empty-state">
+      <div className="inline-flex items-center gap-2 rounded-md border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-fg-secondary)]">
+        <Activity className="size-4 text-[var(--color-accent)]" aria-hidden /> Operator console
+        ready
+      </div>
+      <h1>
+        Investigate with autonomy.
+        <br />
+        Stay in control.
+      </h1>
+      <p>
+        Choose an incident scenario to begin. The agent gathers evidence, proposes a fix, and
+        verifies recovery. You decide what changes.
       </p>
-      <Button variant="primary" onClick={onStartScenario} disabled={busy} id="startScenarioBtn">
-        Start a scenario
-      </Button>
+      <div className="workflow-guide">
+        <div>
+          <Search className="size-5 text-[var(--color-accent)]" aria-hidden />
+          <h2>Follow the evidence</h2>
+          <p>Watch the plan, tool results, and recovery from failures in one activity stream.</p>
+        </div>
+        <div>
+          <ShieldCheck className="size-5 text-[var(--color-warning)]" aria-hidden />
+          <h2>Review every change</h2>
+          <p>Approve, edit, or reject the proposed fix before it can apply.</p>
+        </div>
+        <div>
+          <ClipboardCheck className="size-5 text-[var(--color-success)]" aria-hidden />
+          <h2>Keep the record</h2>
+          <p>Durable state and an audit trail preserve the investigation across restarts.</p>
+        </div>
+      </div>
+      <div className="empty-guidance">
+        <h2 className="mb-2 text-sm font-semibold">Ready for an investigation?</h2>
+        <p className="mb-4 text-sm leading-relaxed text-[var(--color-fg-secondary)]">
+          Use the scenario selector above, or start the first available scenario. Platform tools
+          operate on a simulated cluster; no production credentials are held.
+        </p>
+        <Button variant="primary" onClick={onStartScenario} disabled={busy} id="startScenarioBtn">
+          {busy ? 'Starting…' : 'Start triage'} <ArrowRight className="size-4" aria-hidden />
+        </Button>
+      </div>
     </div>
   )
 }

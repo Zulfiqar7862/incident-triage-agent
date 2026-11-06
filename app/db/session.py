@@ -1,4 +1,5 @@
 """Async SQLAlchemy engine factory (SQLite default, Postgres via DATABASE_URL)."""
+
 from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine

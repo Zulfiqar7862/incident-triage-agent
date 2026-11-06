@@ -3,6 +3,7 @@
 No embeddings: with a handful of runbooks, token overlap plus a stem boost is
 enough, stays deterministic for evals, and avoids dumping noise into context.
 """
+
 from __future__ import annotations
 
 import re

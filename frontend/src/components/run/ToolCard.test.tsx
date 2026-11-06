@@ -19,6 +19,13 @@ describe('ToolCard', () => {
           title: 'Health metrics',
           summary: 'Check cpu for api',
           risk: 'low',
+          operator: {
+            title: 'Check processor use',
+            summary: 'Processor use: 62%. Usual level: 40%.',
+            fields: [{ label: 'Service', value: 'api' }],
+            evidence: [],
+            impact: '',
+          },
           status: 'ok',
           content: JSON.stringify({
             service: 'api',
@@ -36,14 +43,36 @@ describe('ToolCard', () => {
       />,
     )
     expect(screen.getByTestId('tool-card')).toBeInTheDocument()
-    const title = screen.getByText(/Check cpu for api/i)
+    const title = screen.getByText(/Check processor use/i)
     expect(title).toBeInTheDocument()
     expect(title.textContent || '').not.toMatch(/\w+_\w+\(/)
-    await user.click(screen.getByRole('button', { name: /Check cpu for api/i }))
-    expect(screen.getByText('Inputs')).toBeInTheDocument()
-    expect(screen.getByTestId('tool-metrics')).toBeInTheDocument()
-    const openPres = Array.from(container.querySelectorAll('pre')).filter((el) => el.offsetParent !== null)
+    await user.click(screen.getByRole('button', { name: /Check processor use/i }))
+    expect(screen.getByText('Service')).toBeInTheDocument()
+    expect(screen.getByText('Processor use: 62%. Usual level: 40%.')).toBeInTheDocument()
+    const openPres = Array.from(container.querySelectorAll('pre')).filter(
+      (el) => el.offsetParent !== null,
+    )
     expect(screen.queryByTestId('technical-details')).not.toBeInTheDocument()
     expect(openPres.length).toBe(0)
   })
+})
+
+it('does not expose raw technical results even when an error row is expanded', async () => {
+  const raw = 'Traceback TimeoutError DB_POOL_SIZE ERROR POST /api/checkout rollback_deploy()'
+  const { container } = render(
+    <ToolCard
+      tool={{
+        id: 'broken',
+        name: 'search_logs',
+        args: { query: raw },
+        content: raw,
+        summary: raw,
+        status: 'error',
+      }}
+    />,
+  )
+  await userEvent.click(screen.getByRole('button'))
+  expect(container.textContent).not.toContain('TimeoutError')
+  expect(container.textContent).not.toContain('DB_POOL_SIZE')
+  expect(container.querySelector('pre')).toBeNull()
 })

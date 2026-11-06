@@ -1,4 +1,5 @@
 """Human-in-the-loop gate nodes using LangGraph interrupt() + Command(resume=...)."""
+
 from __future__ import annotations
 
 import json
@@ -130,9 +131,11 @@ async def approval_node(state: dict, config: RunnableConfig) -> dict[str, Any]:
         rt.store.save(st)
         return st
 
-    header = "Operator APPROVED this action" + (
-        f" after editing the arguments to {json.dumps(final)}" if edited else ""
-    ) + "."
+    header = (
+        "Operator APPROVED this action"
+        + (f" after editing the arguments to {json.dumps(final)}" if edited else "")
+        + "."
+    )
     if actor == "system-resume":
         header = "Resumed an interrupted approval; replaying the idempotent production change."
     st["operator_log"].append(

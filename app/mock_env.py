@@ -1,12 +1,13 @@
-"""A deterministic, in-process simulation of a small production environment.
+"""In-process simulated platform (ClusterPort adapter).
 
-The agent never touches real infrastructure in this demo. Each scenario file in
+The agent does not hold production cluster credentials. Each scenario under
 /scenarios describes services, deploy history, metrics, logs, and which
-remediation actually fixes the incident. All mutable environment state lives in
-the run's checkpoint (state["env"]), so it is durable and replays identically
-after a restart. Swapping this module for real Kubernetes / Prometheus / Loki
-clients would not change the runtime or the tool schemas.
+remediation actually fixes the incident. Mutable environment state lives in the
+run checkpoint (state["env"]) so work resumes identically after a crash.
+Swap this adapter for live Kubernetes / Prometheus / Loki clients without
+changing the runtime or tool schemas.
 """
+
 from __future__ import annotations
 
 import json
@@ -15,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
 
-from app.tools.display import alert_card
+from app.domain.labels import alert_card
 
 SCENARIO_DIR = Path(__file__).resolve().parent.parent / "scenarios"
 NOW = datetime(2026, 11, 3, 14, 30, 0, tzinfo=UTC)  # fixed "now" keeps output deterministic
@@ -50,12 +51,14 @@ def list_scenarios() -> list[dict]:
     for p in sorted(SCENARIO_DIR.glob("*.json")):
         s = json.loads(p.read_text())
         card = alert_card(s["alert"])
-        out.append({
-            "id": s["id"],
-            "title": s["title"],
-            "description": card["summary"],
-            "alert": card,
-        })
+        out.append(
+            {
+                "id": s["id"],
+                "title": s["title"],
+                "description": card["summary"],
+                "alert": card,
+            }
+        )
     return out
 
 

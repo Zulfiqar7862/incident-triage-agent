@@ -1,4 +1,5 @@
 """Governance controls: hash-chained audit log, hard budgets, emergency stop, scope, risk labels."""
+
 from __future__ import annotations
 
 import asyncio

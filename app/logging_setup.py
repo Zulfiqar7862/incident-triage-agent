@@ -1,4 +1,5 @@
 """Structured logging via structlog (JSON) or plain text for local dev."""
+
 from __future__ import annotations
 
 import logging

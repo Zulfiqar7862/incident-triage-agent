@@ -1,4 +1,5 @@
 """Prepare node: control flags, budgets, inbox drain."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -41,14 +42,14 @@ async def prepare_node(state: dict, config: RunnableConfig) -> dict[str, Any]:
         )
     if st["usage"]["input_tokens"] + st["usage"]["output_tokens"] >= st["max_run_tokens"]:
         return _budget_stop(
-            "Token budget for this run is used up."
-            + (" Run cancelled." if hard else " Resume to grant 50% more.")
+            "Token budget for this run is used up." + (" Run cancelled." if hard else " Resume to grant 50% more.")
         )
-    if rt.settings.max_run_cost_usd > 0 and st["usage"]["cost_usd"] >= st.get("max_run_cost_usd", rt.settings.max_run_cost_usd):
+    if rt.settings.max_run_cost_usd > 0 and st["usage"]["cost_usd"] >= st.get(
+        "max_run_cost_usd", rt.settings.max_run_cost_usd
+    ):
         return _budget_stop(
             f"Cost budget of ${st.get('max_run_cost_usd', rt.settings.max_run_cost_usd):.2f} "
-            "for this run is used up."
-            + (" Run cancelled." if hard else " Resume to raise it 50%.")
+            "for this run is used up." + (" Run cancelled." if hard else " Resume to raise it 50%.")
         )
 
     if st["status"] != "running":

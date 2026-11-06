@@ -1,263 +1,114 @@
 import { ArrowDown } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
-import { ToolCard, type ToolCardModel } from '@/components/run/ToolCard'
-import type { AgentEvent } from '@/lib/types'
+import { ToolCard, type ToolCardModel } from './ToolCard'
+import type { AgentEvent, RunStatus } from '@/lib/types'
 
-const HIDDEN_TYPES = new Set([
-  'llm.call',
-  'gen_ai.span',
-  'memory.update',
-  'context.compacted',
-  'llm.retry',
-])
-
-const META_TOOLS = new Set(['update_working_memory'])
-
-function apiSummary(p: Record<string, unknown>, fallback = ''): string {
-  return String(p.summary || p.title || fallback)
-}
-
-function buildTools(events: AgentEvent[]): Map<string, ToolCardModel> {
-  const map = new Map<string, ToolCardModel>()
-  for (const ev of events) {
-    const p = ev.payload || {}
-    if (ev.type === 'tool.call') {
-      map.set(String(p.id), {
-        id: String(p.id),
+function buildTools(events: AgentEvent[], status?: RunStatus) {
+  const tools = new Map<string, ToolCardModel>()
+  for (const event of events) {
+    const p = event.payload
+    const id = String(p.id || '')
+    if (event.type === 'tool.call')
+      tools.set(id, {
+        id,
         name: String(p.name || ''),
-        args: (p.args as Record<string, unknown>) || {},
-        kind: p.kind as string | undefined,
-        title: p.title as string | undefined,
-        summary: p.summary as string | undefined,
-        risk: p.risk as string | undefined,
-        status: p.kind === 'write' ? 'waiting' : 'running',
+        args: {},
+        kind: String(p.kind || ''),
+        operator: event.operator,
+        status: 'running',
       })
-    } else if (ev.type === 'tool.retry') {
-      const t = map.get(String(p.id))
-      if (t) t.retryNote = `That check failed — trying again shortly.`
-    } else if (ev.type === 'tool.result') {
-      const id = String(p.id)
-      const existing =
-        map.get(id) ||
-        ({
-          id,
-          name: String(p.name || 'tool'),
-          args: {},
-          title: p.title as string | undefined,
-          summary: p.summary as string | undefined,
-          status: 'ok',
-        } satisfies ToolCardModel)
-      existing.status = p.is_error ? 'error' : 'ok'
-      existing.content = String(p.content ?? '')
-      existing.duration_ms = p.duration_ms as number | undefined
-      existing.attempts = p.attempts as number | undefined
-      existing.truncated = p.truncated as ToolCardModel['truncated']
-      map.set(id, existing)
-    } else if (ev.type === 'approval.requested') {
-      const t = map.get(String(p.tool_call_id))
-      if (t) {
-        t.status = 'waiting'
-        if (p.title) t.title = String(p.title)
-        if (p.summary) t.summary = String(p.summary)
-        if (p.risk) t.risk = String(p.risk)
-      }
+    if (event.type === 'tool.result') {
+      const prior = tools.get(id)
+      tools.set(id, {
+        id,
+        name: String(p.name || ''),
+        args: {},
+        ...prior,
+        retryNote: undefined,
+        operator: event.operator,
+        status:
+          event.operator?.state === 'rejected' || event.operator?.state === 'unverified'
+            ? 'stopped'
+            : p.is_error
+              ? 'error'
+              : 'ok',
+      })
+    }
+    if (event.type === 'tool.retry') {
+      const tool = tools.get(id)
+      if (tool) tool.retryNote = 'This check is being retried.'
     }
   }
-  return map
+  if (status && status !== 'running' && status !== 'queued')
+    for (const tool of tools.values()) if (tool.status === 'running') tool.status = 'stopped'
+  return tools
 }
 
-function labelFor(ev: AgentEvent): string {
-  const p = ev.payload || {}
-  switch (ev.type) {
-    case 'operator.message':
-      return `${p.actor || 'You'} said: “${p.text}”${p.queued ? ' (will be read next)' : ''}`
-    case 'operator.control':
-      return `You asked to ${String(p.action).replaceAll('_', ' ')}`
-    case 'memory.saved':
-      return 'Saved a short note for next time'
-    default:
-      return String(ev.type).replaceAll('.', ' ').replaceAll('_', ' ')
-  }
-}
-
-function renderEvent(ev: AgentEvent): ReactNode {
-  const p = ev.payload || {}
-  switch (ev.type) {
-    case 'run.created':
-      return <div className="text-[13px] text-[var(--color-fg-secondary)]">Investigation started</div>
-    case 'memory.recalled':
-      return (
-        <div className="text-[13px] text-[var(--color-fg-secondary)]">
-          Looked up {(p.memories as unknown[])?.length || 0} similar past incident(s)
-        </div>
-      )
-    case 'run.status': {
-      // Prefer backend status_label when present; avoid duplicating the side-panel status.
-      const label = String(p.status_label || String(p.status || '').replaceAll('_', ' '))
-      const reason = p.reason ? String(p.reason) : ''
-      return (
-        <div className="text-[13px] text-[var(--color-fg-secondary)]">
-          {reason || `Status updated: ${label}`}
-        </div>
-      )
-    }
-    case 'agent.message':
-      return (
-        <div className="max-w-[80ch] whitespace-pre-wrap rounded-[10px] border border-[var(--color-accent)]/20 bg-[var(--color-accent-soft)] px-3.5 py-3 leading-relaxed">
-          {String(p.text || '')}
-        </div>
-      )
-    case 'policy.blocked':
-      return (
-        <div className="rounded-r-[10px] border-l-4 border-[var(--color-danger)] bg-[var(--color-danger-soft)] px-3.5 py-2.5 text-[13px]">
-          Skipped a proposed change: {apiSummary(p, 'confidence or scope was not safe enough')}.
-        </div>
-      )
-    case 'approval.requested':
-      return (
-        <div className="rounded-r-[10px] border-l-4 border-[var(--color-warning)] bg-[var(--color-warning-soft)] px-3.5 py-3">
-          <b>Waiting for your approval</b>
-          <p className="m-0 mt-1 text-[13px] leading-relaxed">{apiSummary(p, 'A production change is waiting')}</p>
-        </div>
-      )
-    case 'approval.decided': {
-      const decision = String(p.decision || '')
-      const verb = decision === 'approved' ? 'approved' : decision === 'rejected' ? 'rejected' : decision
-      return (
-        <div className="text-[13px] text-[var(--color-fg-secondary)]">
-          <b className="text-[var(--color-fg)]">{String(p.actor || 'You')}</b> {verb}{' '}
-          {apiSummary(p, 'the proposed change')}
-          {p.edited ? ' (with edits)' : ''}
-          {p.feedback ? `: “${String(p.feedback)}”` : ''}
-        </div>
-      )
-    }
-    case 'input.requested':
-      return (
-        <div className="rounded-r-[10px] border-l-4 border-[var(--color-warning)] bg-[var(--color-warning-soft)] px-3.5 py-3">
-          <b>The assistant asks:</b> {String(p.question)}
-        </div>
-      )
-    case 'run.finished': {
-      const r = p.result as { resolved?: boolean; summary?: string }
-      return (
-        <div
-          className={`outcome rounded-r-[10px] border-l-4 px-3.5 py-3 ${
-            r?.resolved
-              ? 'border-[var(--color-success)] bg-[var(--color-success-soft)]'
-              : 'border-[var(--color-danger)] bg-[var(--color-danger-soft)]'
-          }`}
-        >
-          <b>{r?.resolved ? 'Resolved' : 'Not resolved'}.</b> {r?.summary}
-        </div>
-      )
-    }
-    case 'operator.message':
-    case 'operator.control':
-    case 'memory.saved':
-      return <div className="text-[13px] text-[var(--color-fg-secondary)]">{labelFor(ev)}</div>
-    default:
-      return null
-  }
-}
-
-export function Timeline({ events }: { events: AgentEvent[] }) {
+export function Timeline({ events, status }: { events: AgentEvent[]; status?: RunStatus }) {
   const colRef = useRef<HTMLDivElement>(null)
   const [pinned, setPinned] = useState(true)
-  const tools = useMemo(() => buildTools(events), [events])
-
+  const tools = useMemo(() => buildTools(events, status), [events, status])
   useEffect(() => {
     const el = colRef.current
-    if (!el || !pinned) return
-    el.scrollTop = el.scrollHeight
+    if (el && pinned) el.scrollTop = el.scrollHeight
   }, [events.length, pinned, tools])
 
-  useEffect(() => {
-    const el = colRef.current
-    if (!el) return
-    const onScroll = () => {
-      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120
-      setPinned(nearBottom)
-    }
-    el.addEventListener('scroll', onScroll)
-    return () => el.removeEventListener('scroll', onScroll)
-  }, [])
-
+  const seen = new Set<string>()
   const items: ReactNode[] = []
-  let lastStep: number | null = null
-  const seenTools = new Set<string>()
-  let thinkingOpen = false
-
-  const closeThinking = () => {
-    thinkingOpen = false
-  }
-
-  const pushThinking = (key: string) => {
-    if (thinkingOpen) return
-    thinkingOpen = true
+  for (const event of events) {
+    if (event.type === 'tool.call' || event.type === 'tool.result') {
+      const id = String(event.payload.id)
+      const tool = tools.get(id)
+      if (!tool || seen.has(id) || !tool.operator) continue
+      // A proposed write belongs in the decision panel, not a duplicate checkpoint.
+      if (tool.kind === 'write' && (tool.status === 'running' || tool.status === 'stopped'))
+        continue
+      seen.add(id)
+      items.push(<ToolCard key={`tool-${id}`} tool={tool} />)
+      continue
+    }
+    if (!event.operator || event.type === 'tool.retry') continue
+    const display = event.operator
+    const finished = event.type === 'run.finished'
     items.push(
-      <div key={key} className="animate-in relative grid grid-cols-[48px_minmax(0,1fr)] gap-x-3">
-        <div className="absolute bottom-0 left-[23px] top-0 w-0.5 bg-[var(--color-border)]" />
-        <div className="relative z-[1] pt-3 pr-2 text-right text-[11px] font-semibold text-[var(--color-fg-tertiary)]" />
-        <div className="min-w-0 py-1 pb-2.5">
-          <div className="text-[13px] italic text-[var(--color-fg-tertiary)]">Agent is thinking…</div>
-        </div>
+      <div key={event.seq} className={finished ? 'outcome activity-outcome' : 'activity-note'}>
+        <p className="m-0 text-sm font-semibold">{display.title}</p>
+        {display.summary ? (
+          <p className="m-0 mt-1 text-[13px] leading-relaxed text-[var(--color-fg-secondary)]">
+            {display.summary}
+          </p>
+        ) : null}
       </div>,
     )
   }
-
-  for (const ev of events) {
-    const p = ev.payload || {}
-
-    if (HIDDEN_TYPES.has(ev.type)) {
-      pushThinking(`think-${ev.seq}`)
-      continue
-    }
-
-    if (ev.type === 'tool.call' && META_TOOLS.has(String(p.name || ''))) {
-      pushThinking(`think-meta-${ev.seq}`)
-      continue
-    }
-    if (ev.type === 'tool.result' && META_TOOLS.has(String(p.name || tools.get(String(p.id))?.name || ''))) {
-      continue
-    }
-
-    closeThinking()
-
-    const step = typeof p.step === 'number' ? p.step : null
-    const showStep = step != null && step !== lastStep
-    if (showStep) lastStep = step
-    const gut = showStep ? <span className="rounded bg-[var(--color-bg)] py-0.5 pl-1">{step}</span> : null
-
-    const wrap = (inner: ReactNode, key: string) => (
-      <div key={key} className="animate-in relative grid grid-cols-[48px_minmax(0,1fr)] gap-x-3">
-        <div className="absolute bottom-0 left-[23px] top-0 w-0.5 bg-[var(--color-border)]" />
-        <div className="relative z-[1] pt-3 pr-2 text-right text-[11px] font-semibold text-[var(--color-fg-tertiary)]">
-          {gut}
-        </div>
-        <div className="min-w-0 py-1 pb-2.5">{inner}</div>
-      </div>
-    )
-
-    if (ev.type === 'tool.call') {
-      const id = String(p.id)
-      if (!seenTools.has(id)) {
-        seenTools.add(id)
-        const tool = tools.get(id)
-        if (tool) items.push(wrap(<ToolCard tool={{ ...tool }} />, `tool-${id}`))
-      }
-      continue
-    }
-    if (ev.type === 'tool.result' || ev.type === 'tool.retry') continue
-    const node = renderEvent(ev)
-    if (node) items.push(wrap(node, `e${ev.seq}`))
-  }
-
   return (
-    <div className="relative min-h-0 flex-1">
-      <div ref={colRef} className="h-full overflow-auto px-7 pb-24 pt-2" id="traceCol" data-testid="timeline">
-        {items}
+    <div className="activity-stream relative flex min-h-0 flex-1 flex-col">
+      <div className="activity-heading">
+        <h2 className="text-sm font-semibold">What was checked</h2>
+        <span className="text-xs text-[var(--color-fg-secondary)]">
+          {pinned ? 'Following latest' : 'Reading earlier activity'}
+        </span>
+      </div>
+      <div
+        ref={colRef}
+        className="activity-body min-h-0 flex-1 overflow-auto"
+        id="traceCol"
+        tabIndex={0}
+        aria-label="Investigation activity"
+        data-testid="timeline"
+        onScroll={() => {
+          const el = colRef.current
+          if (el) setPinned(el.scrollHeight - el.scrollTop - el.clientHeight < 120)
+        }}
+      >
+        {items.length ? (
+          items
+        ) : (
+          <p className="text-sm text-[var(--color-fg-secondary)]">
+            Checks will appear here as the investigation progresses.
+          </p>
+        )}
       </div>
       {!pinned ? (
         <Button
@@ -270,7 +121,7 @@ export function Timeline({ events }: { events: AgentEvent[] }) {
             if (el) el.scrollTop = el.scrollHeight
           }}
         >
-          <ArrowDown className="size-3.5" /> Jump to latest
+          <ArrowDown className="size-3.5" aria-hidden /> Jump to latest
         </Button>
       ) : null}
     </div>

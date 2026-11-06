@@ -1,4 +1,5 @@
 """Agent state schema shared by LangGraph and the Store checkpoint."""
+
 from __future__ import annotations
 
 import time
@@ -8,7 +9,7 @@ from typing import Annotated, Any, NotRequired
 from typing_extensions import TypedDict
 
 from app.config import Settings
-from app.tools.display import alert_card, plain_task_from_alert
+from app.domain.labels import alert_card, plain_task_from_alert
 
 
 def _last(left: Any, right: Any) -> Any:

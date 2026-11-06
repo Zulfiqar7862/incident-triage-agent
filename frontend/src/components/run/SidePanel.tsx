@@ -3,16 +3,10 @@ import { ChevronDown } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { ApprovalCard } from '@/components/run/ApprovalCard'
+import { OperatorFacts } from './OperatorFacts'
+import { DataView } from '@/components/common/DataView'
 import { Button } from '@/components/ui/button'
-import {
-  approveRun,
-  cancelRun,
-  messageRun,
-  pauseRun,
-  rejectRun,
-  resumeRun,
-} from '@/lib/api'
-import { mapError } from '@/lib/errors'
+import { useRunActions } from '@/features/run/hooks/useRunActions'
 import { money, num } from '@/lib/format'
 import { RESUMABLE, TERMINAL, type PendingApproval, type RunDetail } from '@/lib/types'
 import { useUiStore } from '@/store/uiStore'
@@ -31,54 +25,19 @@ export function SidePanel({
   const showEngineer = useUiStore((s) => s.showEngineerDetails)
   const setShowEngineer = useUiStore((s) => s.setShowEngineerDetails)
   const [msg, setMsg] = useState('')
-  const [busy, setBusy] = useState(false)
   const [answer, setAnswer] = useState('')
   const [techOpen, setTechOpen] = useState(false)
-
-  async function act(fn: () => Promise<unknown>) {
-    setBusy(true)
-    try {
-      await fn()
-      onRefresh()
-    } catch (e) {
-      const f = mapError(e)
-      toast.error(`${f.title} — ${f.explanation}`)
-    } finally {
-      setBusy(false)
-    }
-  }
+  const actions = useRunActions(run.run_id, onRefresh)
+  const { busy } = actions
 
   const pending = run.pending
-  const reason = run.status_reason || ""
+  const report = run.operator?.report || run.result?.operator
 
   return (
     <aside
-      className="col side sticky top-0 flex max-h-[100dvh] flex-col gap-0 overflow-auto border-l border-[var(--color-border)] bg-[var(--color-elevated)] p-5"
+      className="col side flex min-h-0 flex-col gap-0 overflow-auto border-l border-[var(--color-border)]"
       aria-label="Run controls and state"
     >
-      <section className="mb-5 border-b border-[var(--color-border)] pb-5">
-        <div className="text-base font-semibold tracking-tight">{run.status_label || run.status.replaceAll("_", " ")}</div>
-        {reason ? <p className="mt-2 text-sm leading-relaxed text-[var(--color-fg-secondary)]">{reason}</p> : null}
-        <div className="mt-4 flex flex-wrap gap-2">
-          <Button disabled={busy || !(run.active && run.status === 'running')} onClick={() => void act(() => pauseRun(run.run_id))}>
-            Pause
-          </Button>
-          <Button disabled={busy || !RESUMABLE.includes(run.status)} onClick={() => void act(() => resumeRun(run.run_id))}>
-            Resume
-          </Button>
-          <Button
-            variant="danger"
-            disabled={busy || TERMINAL.includes(run.status)}
-            onClick={() => {
-              if (!window.confirm('Stop this investigation? It cannot be resumed afterwards.')) return
-              void act(() => cancelRun(run.run_id))
-            }}
-          >
-            Stop
-          </Button>
-        </div>
-      </section>
-
       {pending && pending.kind === 'approval' && run.status === 'awaiting_approval' ? (
         <section className="mb-5 border-b border-[var(--color-border)] pb-5">
           <ApprovalCard
@@ -86,33 +45,64 @@ export function SidePanel({
             operator={operator}
             busy={busy}
             onApprove={async (args) => {
-              setBusy(true)
-              try {
-                await approveRun(run.run_id, args)
-                onRefresh()
-              } finally {
-                setBusy(false)
-              }
+              await actions.approve(args)
             }}
             onReject={async (feedback) => {
-              setBusy(true)
-              try {
-                await rejectRun(run.run_id, feedback)
-                onRefresh()
-              } finally {
-                setBusy(false)
-              }
+              await actions.reject(feedback)
             }}
           />
         </section>
       ) : null}
 
+      <section className="run-controls mb-5">
+        <h2 className="section-eyebrow mb-2">Operator control</h2>
+        {run.status !== 'awaiting_approval' ? (
+          <p className="mt-2 text-sm leading-relaxed text-[var(--color-fg-secondary)]">
+            {run.operator?.status || 'Review the current investigation state.'}
+          </p>
+        ) : null}
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button
+            disabled={busy || !(run.active && run.status === 'running')}
+            onClick={() => void actions.pause()}
+          >
+            Pause
+          </Button>
+          <Button
+            disabled={busy || !RESUMABLE.includes(run.status)}
+            onClick={() => void actions.resume()}
+          >
+            Resume
+          </Button>
+          <Button
+            variant="danger"
+            disabled={busy || TERMINAL.includes(run.status)}
+            onClick={() => {
+              if (!window.confirm('Stop this investigation? It cannot be resumed afterwards.'))
+                return
+              void actions.cancel()
+            }}
+          >
+            Stop
+          </Button>
+        </div>
+      </section>
+
       {pending && pending.kind === 'input' && run.status === 'awaiting_input' ? (
         <section className="mb-5 rounded-[14px] border border-[var(--color-warning-border)] bg-[var(--color-warning-soft)] p-4">
-          <h2 className="m-0 mb-2 text-sm font-semibold text-[var(--color-warning)]">Your answer is needed</h2>
-          <p className="mb-3 text-sm leading-relaxed">{pending.question}</p>
+          <h2 className="m-0 mb-2 text-sm font-semibold text-[var(--color-warning)]">
+            Your answer is needed
+          </h2>
+          <p className="mb-3 text-sm leading-relaxed">
+            {pending.operator?.summary ||
+              'The agent needs guidance. Review its full question in the engineering record before answering.'}
+          </p>
+          <label className="field-label" htmlFor="operator-answer">
+            Your answer
+          </label>
           <div className="flex gap-2">
             <input
+              id="operator-answer"
               className="min-w-0 flex-1 rounded-md border border-[var(--color-border)] bg-[var(--color-elevated)] px-2.5 py-1.5 text-sm"
               value={answer}
               onChange={(e) => setAnswer(e.target.value)}
@@ -122,12 +112,12 @@ export function SidePanel({
             <Button
               variant="approve"
               disabled={busy || !answer.trim()}
-              onClick={() =>
-                void act(async () => {
-                  await messageRun(run.run_id, answer.trim())
-                  setAnswer('')
+              onClick={() => {
+                const t = answer.trim()
+                void actions.message(t).then((ok) => {
+                  if (ok) setAnswer('')
                 })
-              }
+              }}
             >
               Send answer
             </Button>
@@ -138,8 +128,11 @@ export function SidePanel({
       {!TERMINAL.includes(run.status) && run.status !== 'awaiting_input' ? (
         <section className="mb-5 border-b border-[var(--color-border)] pb-5">
           <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-[var(--color-fg-tertiary)]">
-            Message the assistant
+            Guide the investigation
           </h2>
+          <label className="field-label" htmlFor="opMsg">
+            Additional context or direction
+          </label>
           <div className="flex gap-2">
             <input
               id="opMsg"
@@ -150,10 +143,12 @@ export function SidePanel({
               onChange={(e) => setMsg(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && msg.trim()) {
-                  void act(async () => {
-                    await messageRun(run.run_id, msg.trim())
-                    setMsg('')
-                    toast.success('Message sent')
+                  const t = msg.trim()
+                  void actions.message(t).then((ok) => {
+                    if (ok) {
+                      setMsg('')
+                      toast.success('Message sent')
+                    }
                   })
                 }
               }}
@@ -161,13 +156,15 @@ export function SidePanel({
             <Button
               id="opSend"
               disabled={busy || !msg.trim()}
-              onClick={() =>
-                void act(async () => {
-                  await messageRun(run.run_id, msg.trim())
-                  setMsg('')
-                  toast.success('Message sent')
+              onClick={() => {
+                const t = msg.trim()
+                void actions.message(t).then((ok) => {
+                  if (ok) {
+                    setMsg('')
+                    toast.success('Message sent')
+                  }
                 })
-              }
+              }}
             >
               Send
             </Button>
@@ -177,68 +174,24 @@ export function SidePanel({
 
       {run.result ? (
         <section className="mb-5 border-b border-[var(--color-border)] pb-5">
-          <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-[var(--color-fg-tertiary)]">
-            Incident report
-          </h2>
-          <div
-            className={`rounded-r-[10px] border-l-4 px-3.5 py-3 ${
-              run.result.resolved
-                ? 'border-[var(--color-success)] bg-[var(--color-success-soft)]'
-                : 'border-[var(--color-danger)] bg-[var(--color-danger-soft)]'
-            }`}
-          >
-            <b>{run.result.resolved ? 'Resolved' : 'Not resolved'}</b>
-            <p className="mt-1.5 mb-0 leading-relaxed">{run.result.summary}</p>
-          </div>
-          <p className="mt-3 text-sm leading-relaxed">
-            <b>Root cause.</b> {run.result.root_cause}
-          </p>
-          {run.result.fix_applied ? (
-            <p className="text-sm leading-relaxed">
-              <b>Fix applied.</b> {String(run.result.fix_applied)}
+          <h2 className="section-eyebrow mb-3">Incident report</h2>
+          <div className="activity-outcome">
+            <p className="m-0 text-sm font-semibold">{report?.title || 'Investigation finished'}</p>
+            <p className="mt-1 text-[13px] leading-relaxed">
+              {report?.summary || 'Review the recorded outcome in the engineering record.'}
             </p>
-          ) : null}
+          </div>
+          <OperatorFacts display={report || undefined} />
         </section>
       ) : null}
 
-      <section className="mb-5 border-b border-[var(--color-border)] pb-5">
-        <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-[var(--color-fg-tertiary)]">Plan</h2>
-        {run.plan.length ? (
-          <ol className="m-0 list-decimal space-y-1.5 pl-5 text-sm leading-relaxed">
-            {run.plan.map((x) => (
-              <li key={x}>{x}</li>
-            ))}
-          </ol>
-        ) : (
-          <p className="text-sm text-[var(--color-fg-secondary)]">No plan yet.</p>
-        )}
-      </section>
-
-      <section className="mb-5 border-b border-[var(--color-border)] pb-5">
-        <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-[var(--color-fg-tertiary)]">
-          Working theories
-        </h2>
-        {run.hypotheses.length ? (
-          run.hypotheses.map((h, i) => (
-            <div
-              key={i}
-              className="mb-2 rounded-md border border-[var(--color-border)] bg-[var(--color-subtle)] px-3 py-2.5 text-sm"
-            >
-              <span className="mr-1.5 text-[11px] font-bold uppercase tracking-wide text-[var(--color-fg-tertiary)]">
-                {h.status}
-              </span>
-              <span className={h.status === 'rejected' ? 'line-through text-[var(--color-fg-tertiary)]' : ''}>
-                {h.text}
-              </span>
-              {h.evidence ? <div className="mt-1 text-xs text-[var(--color-fg-secondary)]">{h.evidence}</div> : null}
-            </div>
-          ))
-        ) : (
-          <p className="text-sm text-[var(--color-fg-secondary)]">None yet.</p>
-        )}
-      </section>
-
-      <Collapsible.Root open={techOpen || showEngineer} onOpenChange={(o) => { setTechOpen(o); setShowEngineer(o) }}>
+      <Collapsible.Root
+        open={techOpen || showEngineer}
+        onOpenChange={(o) => {
+          setTechOpen(o)
+          setShowEngineer(o)
+        }}
+      >
         <Collapsible.Trigger asChild>
           <button
             type="button"
@@ -246,10 +199,28 @@ export function SidePanel({
             data-testid="engineer-details-toggle"
           >
             For engineers
-            <ChevronDown className={cn('size-4 transition-transform', (techOpen || showEngineer) && 'rotate-180')} />
+            <ChevronDown
+              className={cn(
+                'size-4 transition-transform',
+                (techOpen || showEngineer) && 'rotate-180',
+              )}
+            />
           </button>
         </Collapsible.Trigger>
         <Collapsible.Content className="mt-3 space-y-3">
+          <p className="text-xs text-[var(--color-fg-secondary)]">
+            Original model reasoning, diagnostic evidence, and unverified hypotheses. These are not
+            operator instructions.
+          </p>
+          <DataView
+            data={{
+              proposal: pending,
+              report: run.result,
+              plan: run.plan,
+              hypotheses: run.hypotheses,
+            }}
+            compact
+          />
           <dl className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1.5 text-[13px]">
             <dt className="text-[var(--color-fg-secondary)]">Steps</dt>
             <dd className="m-0 text-right">
@@ -266,7 +237,10 @@ export function SidePanel({
             <dt className="text-[var(--color-fg-secondary)]">Tool calls</dt>
             <dd className="m-0 text-right">{run.usage.tool_calls}</dd>
             <dt className="text-[var(--color-fg-secondary)]">Run id</dt>
-            <dd className="m-0 max-w-[14ch] truncate text-right font-mono text-[11px]" title={run.run_id}>
+            <dd
+              className="m-0 max-w-[14ch] truncate text-right font-mono text-[11px]"
+              title={run.run_id}
+            >
               {run.run_id}
             </dd>
           </dl>

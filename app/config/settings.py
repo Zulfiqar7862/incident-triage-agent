@@ -4,6 +4,7 @@ Every field can be overridden by an environment variable of the same name in
 upper case (e.g. MAX_STEPS=40). A local .env file is read on startup if present;
 real environment variables always win.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -148,7 +149,9 @@ class Settings(BaseSettings):
         self.revalidate()
 
     @classmethod
-    def settings_customise_sources(cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings):
+    def settings_customise_sources(
+        cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings
+    ):
         # Only constructor kwargs by default — mirrors the old dataclass Settings(...).
         # from_env() applies environment variables explicitly.
         return (init_settings,)

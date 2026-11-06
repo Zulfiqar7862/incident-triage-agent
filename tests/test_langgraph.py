@@ -1,4 +1,5 @@
 """LangGraph topology and interrupt/resume smoke tests."""
+
 from __future__ import annotations
 
 import asyncio

@@ -1,4 +1,5 @@
 """Hardening added for the ITP bar: loop guard, injection flag, runbooks, budgets, spans."""
+
 from __future__ import annotations
 
 import asyncio
@@ -51,6 +52,7 @@ def test_injection_in_logs_is_flagged_and_not_executed(tmp_path):
         assert st["pending"]["args"]["service"] == "checkout-service"
         # Never proposed restarting orders-db (the injection target)
         assert not any(a["tool"] == "restart_service" and "orders-db" in a["args"] for a in st["actions"])
+
     asyncio.run(go())
 
 
@@ -64,8 +66,14 @@ def test_loop_guard_stops_identical_retries(tmp_path):
         async def complete(self, system, messages, tools, state=None):
             self.n += 1
             # Same broken call over and over.
-            return LLMResponse("retrying", [ToolCall(f"c{self.n}", "query_metrics",
-                                                     {"service": "nope", "metric": "error_rate", "window_minutes": 60})])
+            return LLMResponse(
+                "retrying",
+                [
+                    ToolCall(
+                        f"c{self.n}", "query_metrics", {"service": "nope", "metric": "error_rate", "window_minutes": 60}
+                    )
+                ],
+            )
 
     async def go():
         settings = Settings(db_path=str(tmp_path / "t.db"), max_identical_tool_calls=3, tool_backoff_s=0.01)
@@ -74,6 +82,7 @@ def test_loop_guard_stops_identical_retries(tmp_path):
         rid = rt.create_run("db-pool-regression")["run_id"]
         st = await _wait(store, rid, {"needs_attention"})
         assert "Repeated the same tool call" in st["status_reason"]
+
     asyncio.run(go())
 
 
@@ -89,13 +98,16 @@ def test_budget_alert_emitted_before_hard_stop(tmp_path):
         # scripted usually gates earlier — force a tiny step budget run instead.
         if "budget.alert" not in types:
             # Start a fresh run that will hit the step ceiling.
-            settings2 = Settings(db_path=str(tmp_path / "t2.db"), max_steps=2, budget_alert_ratio=0.5, tool_backoff_s=0.01)
+            settings2 = Settings(
+                db_path=str(tmp_path / "t2.db"), max_steps=2, budget_alert_ratio=0.5, tool_backoff_s=0.01
+            )
             store2 = Store(settings2.db_path)
             rt2 = Runtime(store2, ScriptedPolicy(delay_s=0), settings2)
             rid2 = rt2.create_run("db-pool-regression")["run_id"]
             await _wait(store2, rid2, {"needs_attention"})
             types = [e["type"] for e in store2.events_since(rid2, 0, limit=10_000)]
         assert "budget.alert" in types
+
     asyncio.run(go())
 
 
@@ -114,6 +126,7 @@ def test_scripted_uses_runbooks_and_third_scenario(tmp_path):
         rt.approve(rid)
         st = await _wait(store, rid, {"completed"})
         assert st["result"]["sim_resolved"]
+
     asyncio.run(go())
 
 
@@ -126,6 +139,7 @@ def test_gen_ai_span_events_are_emitted(tmp_path):
         await _wait(store, rid, {"awaiting_approval"})
         types = [e["type"] for e in store.events_since(rid, 0, limit=10_000)]
         assert "gen_ai.span" in types
+
     asyncio.run(go())
 
 

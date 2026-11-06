@@ -1,4 +1,5 @@
 """LangGraph checkpointer factory: SQLite by default, Postgres when DATABASE_URL says so."""
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
@@ -17,9 +18,7 @@ async def open_checkpointer(settings: Settings) -> AsyncIterator[Any]:
 
         url = settings.sqlalchemy_url()
         # postgresql+asyncpg://user:pass@host/db → postgresql://user:pass@host/db
-        conn = url.replace("postgresql+asyncpg://", "postgresql://").replace(
-            "postgres+asyncpg://", "postgresql://"
-        )
+        conn = url.replace("postgresql+asyncpg://", "postgresql://").replace("postgres+asyncpg://", "postgresql://")
         async with AsyncPostgresSaver.from_conn_string(conn) as saver:
             await saver.setup()
             yield saver

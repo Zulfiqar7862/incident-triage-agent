@@ -1,17 +1,15 @@
 import { Brain } from 'lucide-react'
-import { ACTIVE, type RunStatus } from '@/lib/types'
+import { type RunStatus } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
 export function ThinkingIndicator({
   status,
-  phase,
-  step,
 }: {
   status: RunStatus
   phase: string | null
   step?: number
 }) {
-  if (!ACTIVE.includes(status)) return null
+  if (status !== 'running') return null
   return (
     <div
       className={cn(
@@ -23,11 +21,7 @@ export function ThinkingIndicator({
     >
       <Brain className="size-4 shrink-0" />
       <div className="min-w-0 flex-1">
-        <div className="font-semibold">Agent thinking</div>
-        <div className="truncate text-xs opacity-90">
-          {phase || 'Working…'}
-          {step != null ? ` · step ${step}` : ''}
-        </div>
+        <div className="font-medium">Investigation in progress</div>
       </div>
       <div className="animate-think flex gap-1" aria-hidden>
         <span className="size-1.5 rounded-full bg-current" />

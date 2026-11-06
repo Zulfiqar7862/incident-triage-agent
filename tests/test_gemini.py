@@ -7,6 +7,7 @@ function response, ids Gemini issued must be echoed, and tools must be declared
 with parametersJsonSchema. A request that violates any rule gets the same 400 the
 real API returns, so these tests fail the way production would.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -24,21 +25,44 @@ KEY = "test-gemini-key"
 REASON = "Deploy v2.14.0 set DB_POOL_SIZE 50 -> 5; logs show pool exhaustion timeouts"
 
 SCRIPT = [  # (text, [(name, args)]) — what "Gemini" decides on each step
-    ("Planning, then reading the alert.", [
-        ("update_working_memory", {"plan": ["Read alert", "Check deploys and logs", "Fix", "Verify"]}),
-        ("get_alert", {}),
-    ]),
-    ("Checking deploys and logs in parallel.", [
-        ("get_recent_deploys", {"service": "checkout-service"}),
-        ("search_logs", {"service": "checkout-service", "query": "error pool", "limit": 20}),
-    ]),
-    ("The pool-size change explains the errors. Proposing a rollback.", [
-        ("rollback_deploy", {"service": "checkout-service", "to_version": "v2.13.2", "reason": REASON, "confidence": 0.9}),
-    ]),
+    (
+        "Planning, then reading the alert.",
+        [
+            ("update_working_memory", {"plan": ["Read alert", "Check deploys and logs", "Fix", "Verify"]}),
+            ("get_alert", {}),
+        ],
+    ),
+    (
+        "Checking deploys and logs in parallel.",
+        [
+            ("get_recent_deploys", {"service": "checkout-service"}),
+            ("search_logs", {"service": "checkout-service", "query": "error pool", "limit": 20}),
+        ],
+    ),
+    (
+        "The pool-size change explains the errors. Proposing a rollback.",
+        [
+            (
+                "rollback_deploy",
+                {"service": "checkout-service", "to_version": "v2.13.2", "reason": REASON, "confidence": 0.9},
+            ),
+        ],
+    ),
     ("Verifying.", [("query_metrics", {"service": "checkout-service", "metric": "error_rate", "window_minutes": 30})]),
-    ("Recovered.", [("finish", {"summary": "Rolled back checkout-service; errors at baseline.",
-                                "root_cause": "DB_POOL_SIZE reduced from 50 to 5 in v2.14.0 exhausted the connection pool.",
-                                "resolved": True, "fix_applied": "rollback_deploy(checkout-service, v2.13.2)"})]),
+    (
+        "Recovered.",
+        [
+            (
+                "finish",
+                {
+                    "summary": "Rolled back checkout-service; errors at baseline.",
+                    "root_cause": "DB_POOL_SIZE reduced from 50 to 5 in v2.14.0 exhausted the connection pool.",
+                    "resolved": True,
+                    "fix_applied": "rollback_deploy(checkout-service, v2.13.2)",
+                },
+            )
+        ],
+    ),
 ]
 
 
@@ -48,7 +72,7 @@ class StrictGemini:
     def __init__(self, script=SCRIPT, faults: dict[int, httpx.Response] | None = None):
         self.script = script
         self.faults = dict(faults or {})
-        self.issued: list[str] = []      # signatures handed out, in order
+        self.issued: list[str] = []  # signatures handed out, in order
         self.requests: list[dict] = []
         self.calls = 0
 
@@ -82,7 +106,9 @@ class StrictGemini:
             if fcs:
                 sig = fcs[0].get("thoughtSignature")
                 if not sig:
-                    return self._reject(f"Function call {fcs[0]['functionCall']['name']} in the {i}. content block is missing a thought_signature.")
+                    return self._reject(
+                        f"Function call {fcs[0]['functionCall']['name']} in the {i}. content block is missing a thought_signature."
+                    )
                 seen_sigs.append(sig)
                 issued_ids |= {p["functionCall"]["id"] for p in fcs if "id" in p["functionCall"]}
                 nxt = contents[i + 1] if i + 1 < len(contents) else None
@@ -116,11 +142,18 @@ class StrictGemini:
             if j == 0:
                 part["thoughtSignature"] = sig
             parts.append(part)
-        return httpx.Response(200, json={
-            "candidates": [{"content": {"role": "model", "parts": parts}, "finishReason": "STOP"}],
-            "usageMetadata": {"promptTokenCount": 1000 + 100 * step, "candidatesTokenCount": 60, "thoughtsTokenCount": 40},
-            "modelVersion": "gemini-3.5-flash",
-        })
+        return httpx.Response(
+            200,
+            json={
+                "candidates": [{"content": {"role": "model", "parts": parts}, "finishReason": "STOP"}],
+                "usageMetadata": {
+                    "promptTokenCount": 1000 + 100 * step,
+                    "candidatesTokenCount": 60,
+                    "thoughtsTokenCount": 40,
+                },
+                "modelVersion": "gemini-3.5-flash",
+            },
+        )
 
 
 def make(tmp_path, mock: StrictGemini, db: str = "g.db"):
@@ -142,8 +175,10 @@ async def wait_for(store, rid, statuses, timeout=10.0):
 
 def test_full_run_on_gemini_replays_thought_signatures(tmp_path):
     async def go():
-        faults = {2: httpx.Response(429, json={"error": {"message": "quota"}}),
-                  3: httpx.Response(503, json={"error": {"message": "overloaded"}})}
+        faults = {
+            2: httpx.Response(429, json={"error": {"message": "quota"}}),
+            3: httpx.Response(503, json={"error": {"message": "overloaded"}}),
+        }
         mock = StrictGemini(faults=faults)
         _, store, rt = make(tmp_path, mock)
         rid = rt.create_run("db-pool-regression")["run_id"]
@@ -160,8 +195,11 @@ def test_full_run_on_gemini_replays_thought_signatures(tmp_path):
         assert types.count("llm.retry") == 2  # 429 and 503 were retried, not fatal
         # The final request carried every signature Gemini issued, in order.
         last = mock.requests[-1]["contents"]
-        sigs = [p["thoughtSignature"] for c in last if c["role"] == "model" for p in c["parts"] if "thoughtSignature" in p]
+        sigs = [
+            p["thoughtSignature"] for c in last if c["role"] == "model" for p in c["parts"] if "thoughtSignature" in p
+        ]
         assert sigs == mock.issued[:-1]
+
     asyncio.run(go())
 
 
@@ -177,6 +215,7 @@ def test_signatures_survive_a_server_restart(tmp_path):
         rt2.approve(rid)
         st = await wait_for(store, rid, {"completed", "failed"})
         assert st["status"] == "completed", st["status_reason"]
+
     asyncio.run(go())
 
 
@@ -189,28 +228,40 @@ def test_bad_request_fails_the_run_with_a_clear_error_and_is_resumable(tmp_path)
         assert "Invalid model name" in st["status_reason"]
         rt.resume(rid)  # e.g. after fixing config; continues from the checkpoint
         await wait_for(store, rid, {"awaiting_approval"})
+
     asyncio.run(go())
 
 
 def test_blocked_and_malformed_responses():
     from app.llm import from_gemini
+
     with pytest.raises(LLMError, match="SAFETY"):
         from_gemini({"promptFeedback": {"blockReason": "SAFETY"}}, "m")
     with pytest.raises(LLMError, match="finishReason=SAFETY"):
         from_gemini({"candidates": [{"content": {"parts": []}, "finishReason": "SAFETY"}]}, "m")
     r = from_gemini({"candidates": [{"content": {"parts": []}, "finishReason": "MALFORMED_FUNCTION_CALL"}]}, "m")
     assert r.tool_calls == [] and "malformed" in r.text  # runtime nudges the model to retry
-    r = from_gemini({"candidates": [{"content": {"parts": [{"text": "thinking...", "thought": True}, {"text": "hi"}]}}]}, "m")
+    r = from_gemini(
+        {"candidates": [{"content": {"parts": [{"text": "thinking...", "thought": True}, {"text": "hi"}]}}]}, "m"
+    )
     assert r.text == "hi" and r.raw["parts"] == [{"text": "hi"}]  # thought summaries are not replayed
 
 
 def test_history_from_another_provider_gets_a_placeholder_signature():
-    msgs = [{"role": "user", "content": "wm"},
-            {"role": "assistant", "text": "", "tool_calls": [{"id": "toolu_1", "name": "get_alert", "args": {}},
-                                                            {"id": "toolu_2", "name": "list_services", "args": {}}]},
-            {"role": "tool", "tool_call_id": "toolu_1", "name": "get_alert", "content": "{}", "is_error": False},
-            {"role": "tool", "tool_call_id": "toolu_2", "name": "list_services", "content": "boom", "is_error": True},
-            {"role": "user", "content": "[Operator message] check the db"}]
+    msgs = [
+        {"role": "user", "content": "wm"},
+        {
+            "role": "assistant",
+            "text": "",
+            "tool_calls": [
+                {"id": "toolu_1", "name": "get_alert", "args": {}},
+                {"id": "toolu_2", "name": "list_services", "args": {}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "toolu_1", "name": "get_alert", "content": "{}", "is_error": False},
+        {"role": "tool", "tool_call_id": "toolu_2", "name": "list_services", "content": "boom", "is_error": True},
+        {"role": "user", "content": "[Operator message] check the db"},
+    ]
     c = to_gemini(msgs)
     assert [x["role"] for x in c] == ["user", "model", "user"]
     assert c[1]["parts"][0]["thoughtSignature"] == GEMINI_DUMMY_SIGNATURE
@@ -251,7 +302,9 @@ def test_check_llm_script_against_strict_gemini(monkeypatch, capsys):
     import scripts.check_llm as check
 
     mock = StrictGemini()
-    monkeypatch.setattr(check, "make_llm", lambda s: GeminiLLM("gemini-3.5-flash", KEY, 30, transport=httpx.MockTransport(mock)))
+    monkeypatch.setattr(
+        check, "make_llm", lambda s: GeminiLLM("gemini-3.5-flash", KEY, 30, transport=httpx.MockTransport(mock))
+    )
     assert asyncio.run(check.main()) == 0
     out = capsys.readouterr().out
     assert "PASS" in out and "thought signatures" in out

@@ -4,6 +4,7 @@ Schema is defined in app.db.models and versioned via Alembic
 (app/db/migrations). This Store remains the sync facade the Runtime and
 UI use; the async SQLAlchemy engine is available for workers/jobs.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -208,8 +209,7 @@ class Store:
     def verify_event_chain(self, run_id: str) -> dict[str, Any]:
         """Recompute the hash chain for a run. Returns ok / first bad seq."""
         rows = self._rows(
-            "SELECT seq, run_id, ts, type, payload, prev_hash, event_hash "
-            "FROM events WHERE run_id=? ORDER BY seq",
+            "SELECT seq, run_id, ts, type, payload, prev_hash, event_hash FROM events WHERE run_id=? ORDER BY seq",
             (run_id,),
         )
         prev = ""
@@ -255,10 +255,7 @@ class Store:
             " ORDER BY created_at DESC LIMIT ?",
             (*services, now - ttl_days * 86400, limit),
         )
-        return [
-            {**json.loads(r["content"]), "age_days": round((now - r["created_at"]) / 86400, 1)}
-            for r in rows
-        ]
+        return [{**json.loads(r["content"]), "age_days": round((now - r["created_at"]) / 86400, 1)} for r in rows]
 
     # ---- operations ------------------------------------------------------------
     def ping(self) -> bool:

@@ -1,4 +1,5 @@
 """Operational behaviour: auth, audit identity, limits, health, metrics, shutdown."""
+
 from __future__ import annotations
 
 import asyncio
@@ -98,6 +99,7 @@ def test_graceful_shutdown_marks_runs_interrupted(tmp_path):
                 return
             await asyncio.sleep(0.01)
         raise AssertionError(store.load(rid)["status"])
+
     asyncio.run(go())
 
 
@@ -109,4 +111,5 @@ def test_runtime_rejects_runs_beyond_the_limit(tmp_path):
         with pytest.raises(TooBusy):
             rt.create_run("upstream-oom")
         await rt.shutdown()
+
     asyncio.run(go())

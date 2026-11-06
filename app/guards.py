@@ -1,4 +1,5 @@
 """Agent-specific failure modes: runaway loops and prompt-injection markers."""
+
 from __future__ import annotations
 
 import hashlib
@@ -20,7 +21,11 @@ INJECTION_MARKERS = (
 
 def call_fingerprint(name: str, args: dict) -> str:
     # Ignore free-text fields that change every attempt; compare the action itself.
-    filtered = {k: v for k, v in (args or {}).items() if k not in ("reason", "summary", "root_cause", "follow_ups", "note", "question")}
+    filtered = {
+        k: v
+        for k, v in (args or {}).items()
+        if k not in ("reason", "summary", "root_cause", "follow_ups", "note", "question")
+    }
     blob = json.dumps({"name": name, "args": filtered}, sort_keys=True, default=str)
     return hashlib.sha256(blob.encode()).hexdigest()[:16]
 

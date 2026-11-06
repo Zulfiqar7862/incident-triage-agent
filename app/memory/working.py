@@ -5,6 +5,7 @@ redacted summary (service, root cause, fix), never the raw transcript or logs.
 Memories expire after MEMORY_TTL_DAYS and are recalled by service at the start
 of a run, labelled as possibly stale so the agent verifies before relying on them.
 """
+
 from __future__ import annotations
 
 import re

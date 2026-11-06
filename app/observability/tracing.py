@@ -1,4 +1,5 @@
 """OpenTelemetry tracing with GenAI semantic conventions. OTLP export is optional."""
+
 from __future__ import annotations
 
 import logging

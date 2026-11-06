@@ -1,4 +1,5 @@
 """Opt-in live Gemini smoke (skipped in CI without GEMINI_API_KEY)."""
+
 from __future__ import annotations
 
 import os
@@ -43,19 +44,23 @@ def test_live_gemini_health_and_one_run(tmp_path):
     load_dotenv()
     os.environ.setdefault("GEMINI_MODEL", "gemini-3.5-flash-lite")
     settings = Settings.from_env()
-    settings = settings.model_copy(update={
-        "db_path": str(tmp_path / "live.db"),
-        "gemini_model": os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite"),
-        "require_llm": True,
-        "llm_provider": "gemini",
-        "tool_backoff_s": 0.05,
-        "max_steps": 12,
-    })
+    settings = settings.model_copy(
+        update={
+            "db_path": str(tmp_path / "live.db"),
+            "gemini_model": os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite"),
+            "require_llm": True,
+            "llm_provider": "gemini",
+            "tool_backoff_s": 0.05,
+            "max_steps": 12,
+        }
+    )
     llm = make_llm(settings)
     with TestClient(create_app(settings, llm=llm)) as c:
         h = c.get("/api/health").json()
         assert h["llm"]["provider"] == "gemini"
-        rid = c.post("/api/runs", json={"scenario_id": "upstream-oom"}, headers={"X-Operator": "live-test"}).json()["run_id"]
+        rid = c.post("/api/runs", json={"scenario_id": "upstream-oom"}, headers={"X-Operator": "live-test"}).json()[
+            "run_id"
+        ]
         st = None
         for _ in range(300):
             st = c.get(f"/api/runs/{rid}").json()

@@ -1,4 +1,5 @@
 """Prometheus metrics for runs, tokens, cost, latency, and approvals."""
+
 from __future__ import annotations
 
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest

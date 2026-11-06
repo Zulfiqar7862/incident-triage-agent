@@ -14,6 +14,7 @@ total still exceeds the token budget, whole old steps are dropped (never
 splitting a tool call from its result). Nothing important is lost because the
 action log in working memory already records what each step did.
 """
+
 from __future__ import annotations
 
 import json
@@ -49,7 +50,11 @@ def one_line(text: str, n: int = 160) -> str:
 
 
 def brief_args(args: dict, n: int = 140) -> str:
-    parts = [f"{k}={v}" for k, v in (args or {}).items() if k not in ("reason", "summary", "root_cause", "follow_ups", "plan", "hypotheses")]
+    parts = [
+        f"{k}={v}"
+        for k, v in (args or {}).items()
+        if k not in ("reason", "summary", "root_cause", "follow_ups", "plan", "hypotheses")
+    ]
     return one_line(", ".join(parts), n)
 
 
@@ -72,16 +77,29 @@ def truncate_output(text: str, max_chars: int) -> tuple[str, dict | None]:
 
 def render_working_memory(state: dict, dropped_groups: int = 0) -> str:
     u = state["usage"]
-    L = ["<working_memory>", "Rebuilt from durable run state on every step. This is the authoritative record of the run.", ""]
+    L = [
+        "<working_memory>",
+        "Rebuilt from durable run state on every step. This is the authoritative record of the run.",
+        "",
+    ]
     L += ["## Task", state["task"], ""]
-    L += ["## Budget", f"Step {state['step']} of {state['max_steps']}. Tokens used so far: {u['input_tokens'] + u['output_tokens']:,} of {state['max_run_tokens']:,}.", ""]
+    L += [
+        "## Budget",
+        f"Step {state['step']} of {state['max_steps']}. Tokens used so far: {u['input_tokens'] + u['output_tokens']:,} of {state['max_run_tokens']:,}.",
+        "",
+    ]
 
     L.append("## Plan")
-    L += [f"{i}. {p}" for i, p in enumerate(state["plan"], 1)] or ["(no plan yet: write one with update_working_memory)"]
+    L += [f"{i}. {p}" for i, p in enumerate(state["plan"], 1)] or [
+        "(no plan yet: write one with update_working_memory)"
+    ]
     L.append("")
 
     L.append("## Hypotheses")
-    L += [f"- [{h['id']} | {h['status']}] {h['text']}" + (f" (evidence: {h['evidence']})" if h.get("evidence") else "") for h in state["hypotheses"]] or ["(none yet)"]
+    L += [
+        f"- [{h['id']} | {h['status']}] {h['text']}" + (f" (evidence: {h['evidence']})" if h.get("evidence") else "")
+        for h in state["hypotheses"]
+    ] or ["(none yet)"]
     L.append("")
 
     actions = state["actions"]
@@ -114,11 +132,17 @@ def render_working_memory(state: dict, dropped_groups: int = 0) -> str:
     if state["recalled_memories"]:
         L.append("## Past incidents for this service (long-term memory; may be stale, verify before relying on them)")
         for m in state["recalled_memories"]:
-            L.append(f"- {m['date']} ({m['age_days']} days ago): root cause: {m['root_cause']} | fix: {m['fix'] or 'none'}")
+            L.append(
+                f"- {m['date']} ({m['age_days']} days ago): root cause: {m['root_cause']} | fix: {m['fix'] or 'none'}"
+            )
         L.append("")
 
     if dropped_groups:
-        L += ["## Context note", f"{dropped_groups} older transcript step(s) were compacted out to stay within the context budget. Their outcomes are in the action log above.", ""]
+        L += [
+            "## Context note",
+            f"{dropped_groups} older transcript step(s) were compacted out to stay within the context budget. Their outcomes are in the action log above.",
+            "",
+        ]
     L.append("</working_memory>")
     return "\n".join(L)
 
@@ -136,7 +160,11 @@ def _group(history: list[dict]) -> list[list[dict]]:
 
 def _shrink(m: dict) -> dict:
     if m["role"] == "tool" and len(m["content"]) > 400:
-        return {**m, "content": m["content"][:300] + f"… [older output compacted from {len(m['content'])} chars; see action log]"}
+        return {
+            **m,
+            "content": m["content"][:300]
+            + f"… [older output compacted from {len(m['content'])} chars; see action log]",
+        }
     return m
 
 

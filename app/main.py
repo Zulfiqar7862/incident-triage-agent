@@ -1,5 +1,6 @@
 """HTTP API: agent runtime, tools, run state, a live event stream (SSE), health
 and metrics endpoints, and optional bearer-token auth."""
+
 from __future__ import annotations
 
 import asyncio
@@ -19,7 +20,8 @@ from pydantic import BaseModel, Field
 
 from .config import Settings
 from .context import SYSTEM_PROMPT, build_context
-from .llm import make_llm
+from .domain.lifecycle import TERMINAL
+from .infrastructure.llm_factory import make_llm
 from .logging_setup import configure_logging
 from .mock_env import list_scenarios
 from .observability.langfuse_tracer import configure_langfuse, shutdown_langfuse
@@ -65,8 +67,10 @@ def create_app(settings: Settings | None = None, llm=None) -> FastAPI:
         if n:
             log.warning("marked %d in-flight run(s) as interrupted after restart", n)
         if not settings.api_token:
-            log.warning("API_TOKEN is not set: the API, including production approvals, is unauthenticated. "
-                        "Set API_TOKEN before exposing this service beyond localhost.")
+            log.warning(
+                "API_TOKEN is not set: the API, including production approvals, is unauthenticated. "
+                "Set API_TOKEN before exposing this service beyond localhost."
+            )
         log.info("ready: provider=%s model=%s", runtime.llm.provider, runtime.llm.model)
         yield
         await runtime.shutdown()
@@ -84,9 +88,10 @@ def create_app(settings: Settings | None = None, llm=None) -> FastAPI:
         version="1.0.0",
         lifespan=lifespan,
         description=(
-            "Durable incident-triage agent runtime: investigate alerts with tools, "
-            "gate production changes behind operator approval (with confidence routing), "
-            "checkpoint every step to SQLite, and stream the decision trace over SSE.\n\n"
+            "Production agent runtime (not a chatbot wrapper): plans investigations, "
+            "calls tools, recovers from failures, checkpoints durable state for resume, "
+            "gates every production mutation behind operator approval, and streams the "
+            "decision trace over SSE for live operator control.\n\n"
             "When `API_TOKEN` is set, send `Authorization: Bearer <token>` "
             "(SSE may use `?token=` because EventSource cannot set headers). "
             "Optional `X-Operator` is recorded in the audit log."
@@ -94,26 +99,30 @@ def create_app(settings: Settings | None = None, llm=None) -> FastAPI:
     )
     app.state.runtime = runtime
 
+    from app.presentation.operator import error_display
+
     # ---- errors and security headers -------------------------------------------------------
     @app.exception_handler(NotFound)
     async def _not_found(_: Request, exc: NotFound):
-        return JSONResponse({"detail": str(exc)}, status_code=404)
+        return JSONResponse({"detail": str(exc), "operator": error_display(404)}, status_code=404)
 
     @app.exception_handler(RunStateError)
     async def _conflict(_: Request, exc: RunStateError):
-        return JSONResponse({"detail": str(exc)}, status_code=409)
+        return JSONResponse({"detail": str(exc), "operator": error_display(409)}, status_code=409)
 
     @app.exception_handler(InvalidInput)
     async def _invalid(_: Request, exc: InvalidInput):
-        return JSONResponse({"detail": str(exc)}, status_code=422)
+        return JSONResponse({"detail": str(exc), "operator": error_display(422)}, status_code=422)
 
     @app.exception_handler(TooBusy)
     async def _busy(_: Request, exc: TooBusy):
-        return JSONResponse({"detail": str(exc)}, status_code=429, headers={"Retry-After": "30"})
+        return JSONResponse(
+            {"detail": str(exc), "operator": error_display(429)}, status_code=429, headers={"Retry-After": "30"}
+        )
 
     @app.exception_handler(CheckpointConflict)
     async def _cas(_: Request, exc: CheckpointConflict):
-        return JSONResponse({"detail": str(exc)}, status_code=409)
+        return JSONResponse({"detail": str(exc), "operator": error_display(409)}, status_code=409)
 
     origins = [o.strip() for o in (settings.cors_origins or "").split(",") if o.strip()]
     if origins:
@@ -210,17 +219,19 @@ def create_app(settings: Settings | None = None, llm=None) -> FastAPI:
         body, ctype = render_metrics()
         return PlainTextResponse(body.decode("utf-8"), media_type=ctype)
 
-
     @app.get("/api/health")
     def health(_: str = Depends(require_auth)):
         return {
             "ok": True,
             "auth": bool(settings.api_token),
             "llm": {"provider": runtime.llm.provider, "model": runtime.llm.model},
-            "limits": {"max_steps": settings.max_steps, "max_run_tokens": settings.max_run_tokens,
-                       "context_budget_tokens": settings.context_budget_tokens,
-                       "min_write_confidence": settings.min_write_confidence,
-                       "max_concurrent_runs": settings.max_concurrent_runs},
+            "limits": {
+                "max_steps": settings.max_steps,
+                "max_run_tokens": settings.max_run_tokens,
+                "context_budget_tokens": settings.context_budget_tokens,
+                "min_write_confidence": settings.min_write_confidence,
+                "max_concurrent_runs": settings.max_concurrent_runs,
+            },
         }
 
     @app.get("/api/scenarios")
@@ -249,12 +260,19 @@ def create_app(settings: Settings | None = None, llm=None) -> FastAPI:
     def get_context(run_id: str, _: str = Depends(require_auth)):
         """Exactly what the model would see on its next step, rebuilt from the checkpoint."""
         messages, stats = build_context(runtime.get(run_id), settings)
-        return {"system": SYSTEM_PROMPT, "messages": messages, "stats": stats, "tools": [t["name"] for t in tool_schemas()]}
+        return {
+            "system": SYSTEM_PROMPT,
+            "messages": messages,
+            "stats": stats,
+            "tools": [t["name"] for t in tool_schemas()],
+        }
 
     @app.get("/api/runs/{run_id}/events")
     def get_events(run_id: str, after: int = 0, _: str = Depends(require_auth)):
-        runtime.get(run_id)
-        return store.events_since(run_id, after)
+        from app.presentation.operator import present_event
+
+        st = runtime.get(run_id)
+        return [present_event(event, st) for event in store.events_since(run_id, after)]
 
     @app.get("/api/runs/{run_id}/stream")
     async def stream(run_id: str, request: Request, after: int = 0, _: str = Depends(require_auth)):
@@ -266,23 +284,27 @@ def create_app(settings: Settings | None = None, llm=None) -> FastAPI:
             nonlocal cursor
             yield "retry: 2000\n\n"
             idle = 0
-            from .runtime import TERMINAL
             while not await request.is_disconnected():
+                from app.presentation.operator import present_event
+
                 events = store.events_since(run_id, cursor)
-                for e in events:
+                current = store.load(run_id) or {}
+                for raw in events:
+                    e = present_event(raw, current)
                     cursor = e["seq"]
                     yield f"id: {e['seq']}\ndata: {json.dumps(e, default=str)}\n\n"
                 st = store.load(run_id) or {}
                 if st.get("status") in TERMINAL and not events:
-                    yield f"event: end\ndata: {json.dumps({"status": st.get("status")})}\n\n"
+                    yield f"event: end\ndata: {json.dumps({'status': st.get('status')})}\n\n"
                     return
                 idle = 0 if events else idle + 1
                 if idle and idle % 60 == 0:
                     yield ": keepalive\n\n"
                 await asyncio.sleep(0.25)
 
-        return StreamingResponse(gen(), media_type="text/event-stream",
-                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+        return StreamingResponse(
+            gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+        )
 
     # ---- operator actions (async: they schedule work on the event loop) ------------------------
     def _ok(run_id: str):

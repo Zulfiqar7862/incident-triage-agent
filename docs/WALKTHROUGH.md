@@ -1,7 +1,6 @@
 # Operator walkthrough
 
-
-End-to-end tour of the React operator console in **offline / scripted provider** (no API key required). Recording: [`screenshots/walkthrough.mp4`](screenshots/walkthrough.mp4). Recreate with:
+End-to-end tour of the **operator console**: watch the agent think, intervene at the approval gate, and verify a durable finish. Uses the **offline / scripted provider** (no API key). Recording: [`screenshots/walkthrough.mp4`](screenshots/walkthrough.mp4). Recreate with:
 
 ```bash
 make frontend

@@ -1,4 +1,4 @@
-import type { HealthInfo, RunDetail, RunSummary, Scenario } from './types'
+import type { HealthInfo, OperatorDisplay, RunDetail, RunSummary, Scenario } from './types'
 
 const TOKEN_KEY = 'apiToken'
 const OPERATOR_KEY = 'operator'
@@ -37,7 +37,11 @@ export function setOperator(name: string) {
 
 export class ApiError extends Error {
   status: number
-  constructor(status: number, message: string) {
+  constructor(
+    status: number,
+    message: string,
+    public operator?: OperatorDisplay,
+  ) {
     super(message)
     this.status = status
   }
@@ -70,7 +74,7 @@ async function api<T>(path: string, opts: RequestInit = {}, retried = false): Pr
         .map((item) => {
           if (item && typeof item === 'object' && 'msg' in item) {
             const loc = Array.isArray((item as { loc?: unknown }).loc)
-              ? ((item as { loc: unknown[] }).loc).filter((x) => x !== 'body').join('.')
+              ? (item as { loc: unknown[] }).loc.filter((x) => x !== 'body').join('.')
               : ''
             return loc ? `${loc}: ${(item as { msg: string }).msg}` : (item as { msg: string }).msg
           }
@@ -79,7 +83,7 @@ async function api<T>(path: string, opts: RequestInit = {}, retried = false): Pr
         .join('; ')
     } else if (raw != null) detail = String(raw)
     else detail = `${r.status} ${r.statusText}`
-    throw new ApiError(r.status, detail)
+    throw new ApiError(r.status, detail, (j as { operator?: OperatorDisplay }).operator)
   }
   return j as T
 }
@@ -91,8 +95,7 @@ export const fetchHealth = () => api<HealthInfo>('/api/health')
 export const fetchScenarios = () => api<Scenario[]>('/api/scenarios')
 export const fetchRuns = () => api<RunSummary[]>('/api/runs')
 export const fetchRun = (id: string) => api<RunDetail>(`/api/runs/${encodeURIComponent(id)}`)
-export const createRun = (scenario_id: string) =>
-  post<RunDetail>('/api/runs', { scenario_id })
+export const createRun = (scenario_id: string) => post<RunDetail>('/api/runs', { scenario_id })
 export const approveRun = (id: string, args?: Record<string, unknown>) =>
   post<RunDetail>(`/api/runs/${encodeURIComponent(id)}/approve`, { args })
 export const rejectRun = (id: string, feedback: string) =>
@@ -100,8 +103,10 @@ export const rejectRun = (id: string, feedback: string) =>
 export const messageRun = (id: string, text: string) =>
   post<RunDetail>(`/api/runs/${encodeURIComponent(id)}/message`, { text })
 export const pauseRun = (id: string) => post<RunDetail>(`/api/runs/${encodeURIComponent(id)}/pause`)
-export const resumeRun = (id: string) => post<RunDetail>(`/api/runs/${encodeURIComponent(id)}/resume`)
-export const cancelRun = (id: string) => post<RunDetail>(`/api/runs/${encodeURIComponent(id)}/cancel`)
+export const resumeRun = (id: string) =>
+  post<RunDetail>(`/api/runs/${encodeURIComponent(id)}/resume`)
+export const cancelRun = (id: string) =>
+  post<RunDetail>(`/api/runs/${encodeURIComponent(id)}/cancel`)
 export const fetchContext = (id: string) =>
   api<{
     system: string

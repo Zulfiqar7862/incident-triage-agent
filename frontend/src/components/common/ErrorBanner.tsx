@@ -27,8 +27,12 @@ export function ErrorBanner({
       <div className="flex items-start gap-3">
         <AlertTriangle className="mt-0.5 size-5 shrink-0 text-[var(--color-danger)]" aria-hidden />
         <div className="min-w-0 flex-1">
-          <h3 className="m-0 text-[15px] font-semibold text-[var(--color-danger)]">{error.title}</h3>
-          <p className="mt-1 mb-0 text-sm leading-relaxed text-[var(--color-fg-secondary)]">{error.explanation}</p>
+          <h3 className="m-0 text-[15px] font-semibold text-[var(--color-danger)]">
+            {error.title}
+          </h3>
+          <p className="mt-1 mb-0 text-sm leading-relaxed text-[var(--color-fg-secondary)]">
+            {error.explanation}
+          </p>
           <p className="mt-1.5 mb-0 text-sm text-[var(--color-fg)]">
             <span className="font-medium">Next:</span> {error.nextStep}
           </p>
@@ -42,7 +46,7 @@ export function ErrorBanner({
               <Collapsible.Root open={open} onOpenChange={setOpen}>
                 <Collapsible.Trigger asChild>
                   <Button size="sm" variant="ghost" aria-expanded={open}>
-                    {open ? 'Hide details' : 'Details'}
+                    {open ? 'Hide engineering details' : 'For engineers'}
                   </Button>
                 </Collapsible.Trigger>
                 <Collapsible.Content>

@@ -16,7 +16,10 @@ describe('mapError', () => {
     expect(mapError(new ApiError(409, 'cas')).kind).toBe('conflict')
     const v = mapError(new ApiError(422, 'service: field required; confidence: ensure <= 1'))
     expect(v.kind).toBe('validation')
-    expect(v.explanation).toMatch(/Service/i)
+    expect(v.explanation).toMatch(/Review your entries/i)
+    expect(
+      mapError(new ApiError(422, 'DB_POOL_SIZE TimeoutError ERROR POST /api/checkout')).explanation,
+    ).not.toMatch(/DB_POOL_SIZE|TimeoutError|ERROR POST/)
     expect(mapError(new ApiError(429, 'slow down')).kind).toBe('rate_limit')
     expect(mapError(new ApiError(503, 'boom')).kind).toBe('server')
   })

@@ -1,4 +1,5 @@
 """Optional Langfuse integration. No-op unless LANGFUSE_PUBLIC_KEY + SECRET are set."""
+
 from __future__ import annotations
 
 import logging

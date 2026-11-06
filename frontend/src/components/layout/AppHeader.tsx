@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Moon, Sun } from 'lucide-react'
+import { Activity, Moon, Sun } from 'lucide-react'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -34,64 +34,56 @@ export function AppHeader() {
   const offline = health.data?.llm.provider === 'scripted'
 
   return (
-    <header className="app-header flex min-h-14 flex-wrap items-center gap-3 border-b border-[var(--color-border)] bg-[var(--color-elevated)] px-[18px] py-2 shadow-sm z-10">
-      <div className="brand flex items-center gap-2.5 text-[15px] font-semibold tracking-tight" aria-label="Incident triage agent">
-        <span className="brand-mark grid size-7 place-items-center rounded-lg bg-gradient-to-br from-[var(--color-accent)] to-[#7c3aed] text-[13px] font-bold text-white">
-          IT
+    <header className="console-toolbar">
+      <div className="toolbar-brand">
+        <span className="brand-mark">
+          <Activity className="size-5" aria-hidden />
         </span>
-        <span>Incident triage</span>
+        <div>
+          <div className="text-base font-semibold tracking-tight">Incident triage</div>
+          <div className="mt-0.5 text-xs text-[var(--color-fg-secondary)]">
+            Operations workspace
+          </div>
+        </div>
       </div>
-      <span
-        id="mode"
-        className={`mode text-[12.5px] ${offline ? 'text-[var(--color-warning)]' : 'text-[var(--color-fg-secondary)]'}`}
-        role="status"
-      >
-        <span
-          className={`dot mr-1.5 inline-block size-1.5 rounded-full align-middle ${
-            offline ? 'bg-[var(--color-warning)]' : 'bg-[var(--color-success)]'
-          }`}
-        />
-        {health.isError
-          ? 'Can’t reach the server'
-          : offline
-            ? 'Offline provider (CI / local)'
-            : 'Live model'}
-      </span>
-      <span className="min-w-2 flex-1" />
-      <div className="header-actions flex flex-wrap items-center gap-2">
-        <label className="text-xs text-[var(--color-fg-secondary)]" htmlFor="operator">
-          Signed in as
-        </label>
-        <input
-          id="operator"
-          className="w-[140px] rounded-md border border-[var(--color-border)] bg-[var(--color-elevated)] px-2.5 py-1.5 text-sm"
-          placeholder="Your name"
-          autoComplete="name"
-          aria-label="Your name for the audit log"
-          value={operator}
-          onChange={(e) => setOperator(e.target.value)}
-        />
-        <label className="sr-only" htmlFor="scenario">
-          Incident scenario
-        </label>
-        <select
-          id="scenario"
-          className="rounded-md border border-[var(--color-border)] bg-[var(--color-elevated)] px-2.5 py-1.5 text-sm"
-          aria-label="Incident scenario"
-          value={effectiveScenarioId}
-          onChange={(e) => setScenarioId(e.target.value)}
-        >
-          <option value="" disabled>
-            Select scenario
-          </option>
-          {(scenarios.data || []).map((s) => (
-            <option key={s.id} value={s.id} title={s.description}>
-              {s.title}
+      <div className="toolbar-fields">
+        <div>
+          <label className="field-label" htmlFor="operator">
+            Operator · audit identity
+          </label>
+          <input
+            id="operator"
+            className="console-input w-[160px]"
+            placeholder="Your name"
+            autoComplete="name"
+            aria-label="Your name for the audit log"
+            value={operator}
+            onChange={(e) => setOperator(e.target.value)}
+          />
+        </div>
+        <div className="scenario-field">
+          <label className="field-label" htmlFor="scenario">
+            Incident scenario
+          </label>
+          <select
+            id="scenario"
+            className="console-input max-w-[280px]"
+            value={effectiveScenarioId}
+            onChange={(e) => setScenarioId(e.target.value)}
+          >
+            <option value="" disabled>
+              Select scenario
             </option>
-          ))}
-        </select>
+            {(scenarios.data || []).map((s) => (
+              <option key={s.id} value={s.id} title={s.description}>
+                {s.title}
+              </option>
+            ))}
+          </select>
+        </div>
         <Button
           id="startBtn"
+          className="start-triage"
           variant="primary"
           disabled={start.isPending}
           onClick={() => {
@@ -102,17 +94,31 @@ export function AppHeader() {
             start.mutate(effectiveScenarioId)
           }}
         >
-          Start triage
+          {start.isPending ? 'Starting…' : 'Start triage'}
         </Button>
         <Button
           variant="ghost"
           aria-label="Toggle color theme"
-          onClick={() => setTheme(theme === 'dark' ? 'light' : theme === 'light' ? 'system' : 'dark')}
           title={`Theme: ${theme}`}
+          onClick={() =>
+            setTheme(theme === 'dark' ? 'light' : theme === 'light' ? 'system' : 'dark')
+          }
         >
-          {theme === 'dark' ? <Moon className="size-4" /> : <Sun className="size-4" />}
+          {theme === 'dark' ? (
+            <Moon className="size-4" aria-hidden />
+          ) : (
+            <Sun className="size-4" aria-hidden />
+          )}
         </Button>
       </div>
+      {health.isError ? (
+        <p className="w-full text-sm text-[var(--color-danger)]" role="status">
+          Can’t reach the server. Reconnecting…
+        </p>
+      ) : null}
+      <span className="sr-only" id="mode">
+        {offline ? 'Scripted model provider' : 'Live model provider'}
+      </span>
     </header>
   )
 }

@@ -2,6 +2,13 @@
 
 A governed production agent for live incident response — not a chatbot wrapper.
 
+**What this is evaluated on**
+
+1. **Autonomy** — plans the investigation, calls typed tools, retries transient failures, and finishes with a verified incident report.
+2. **State / context** — every step is checkpointed (LangGraph + Store CAS); interrupted runs resume after crash or restart, including mid-approval.
+3. **Operator UX** — React console streams the reasoning trace over SSE; operators approve / reject / edit writes, message the agent, pause, resume, or emergency-stop.
+4. **Backend API** — FastAPI runtime for runs, tools, durable state, metrics, audit hash-chain verify, and the live event stream.
+
 The agent plans an investigation, calls tools (metrics, logs, deploys, runbooks), recovers from tool and model failures, and **stops at a human approval gate before any production mutation**. Run state and context are checkpointed so work resumes after a crash. Operators watch the live reasoning trace over SSE, intervene with messages or edits, and approve or reject proposed changes. The backend exposes a FastAPI runtime for runs, tools, durable state, metrics, and the event stream.
 
 ![Empty console](docs/screenshots/01-empty.png)
@@ -53,17 +60,22 @@ flowchart TD
 | Path | Role |
 |---|---|
 | `frontend/` | Production operator UI (Vite + React + TypeScript) |
+| `app/domain/` | Pure policies & labels (lifecycle sets, write-confidence gate, alert cards) |
+| `app/application/` | Use-case helpers (exceptions, write-gate builder) |
+| `app/infrastructure/` | Adapter entry points (cluster factory, LLM Strategy factory) |
 | `app/agent/graph.py` | LangGraph `StateGraph` (`prepare` → `act` → gates → loop) |
 | `app/agent/nodes/` | Node implementations; HITL via `interrupt` / `Command(resume=...)` |
 | `app/runtime.py` | Lifecycle facade: create / pause / cancel / approve; drives the graph |
 | `app/config/` | `pydantic-settings` v2 (env-only overrides via `Settings.from_env()`) |
 | `app/context/` | Layered prompt: system + working memory + compacted transcript |
-| `app/tools/` | Typed schemas; read / write / meta kinds |
-| `app/llm/` | Neutral history + provider adapters + Gemini 429 → fallback model |
+| `app/tools/` | Typed schemas + registry factory; read / write / meta kinds |
+| `app/llm/` | Neutral history + provider Strategy adapters + Gemini 429 → fallback |
 | `app/db/` | SQLAlchemy 2 models + Alembic migrations |
 | `app/store.py` | Sync Store facade (UI/SSE source of truth) with checkpoint CAS |
 | `app/observability/` | structlog, OTel GenAI spans, Prometheus `/metrics`, optional Langfuse |
-| `app/main.py` | HTTP API, auth, CORS, CSP, health/metrics, SSE, SPA |
+| `app/main.py` | Thin HTTP presentation: auth, CORS, CSP, health/metrics, SSE, SPA |
+| `docs/LOCAL_SETUP.md` | Archive-friendly setup, tests, and release limitations |
+| `.claude/skills/` | Pinned project-local frontend design/testing guidance and licenses |
 | `scripts/quickstart.sh` | One-command local boot (Python + frontend build + uvicorn) |
 
 Lifecycle:
@@ -77,8 +89,8 @@ queued → running ⇄ awaiting_approval / awaiting_input / paused / needs_atten
 
 ## Prerequisites
 
-- Python **3.11+** (3.12 recommended; CI uses 3.12)
-- Node.js **20+** (22 recommended) with npm — required to build the React UI
+- Python **3.12 or 3.13** (CI declares 3.12; this local release was tested with 3.13.5)
+- Node.js **22.12+ or 24 LTS** with npm (this local release was tested with 24.22.1 / npm 11.21.1) — required to build the React UI
 - `make` optional
 - Docker optional (for Compose)
 - A Gemini API key **only if** you want a live model (the offline deterministic provider works without one)
@@ -86,6 +98,13 @@ queued → running ⇄ awaiting_approval / awaiting_input / paused / needs_atten
 ---
 
 ## Installation
+
+For the supplied source ZIP, extract it and start with [Local setup](docs/LOCAL_SETUP.md).
+The release source contains the final refactor/UI changes. For the published Git
+checkout, clone the repository below. The standalone archive intentionally has no
+`.git`, credentials, installed dependencies, databases, or generated MP4.
+`make install` installs Git hooks and is intended for a Git checkout; use the
+explicit dependency commands below for an extracted archive.
 
 ```bash
 git clone https://github.com/Zulfiqar7862/incident-triage-agent.git
@@ -112,7 +131,7 @@ See [`.env.example`](.env.example). Important variables:
 |---|---|---|
 | `LLM_PROVIDER` | `auto` | `auto` \| `gemini` \| `anthropic` \| `openai` \| `scripted` |
 | `GEMINI_API_KEY` | — | Live Gemini; omit to use the offline deterministic provider |
-| `REQUIRE_LLM` | `true` | Set `false` to allow scripted fallback without a key |
+| `REQUIRE_LLM` | `false` | Set `false` to allow scripted fallback without a key |
 | `API_TOKEN` | — | Bearer token required outside localhost |
 | `CORS_ORIGINS` | empty | Comma-separated; empty = same-origin |
 | `DB_PATH` | `data/agent.db` | SQLite path (or set `DATABASE_URL` for Postgres) |
@@ -123,6 +142,10 @@ Secrets are env-only, redacted in logs, and never committed.
 ---
 
 ## Running locally
+
+For an explicitly offline run: `LLM_PROVIDER=scripted REQUIRE_LLM=false bash scripts/quickstart.sh`.
+Dependency installation still requires network access or a populated package cache;
+"offline" describes agent execution, not the first dependency install.
 
 ### One command (production build of the UI)
 
@@ -196,11 +219,12 @@ Results for live Gemini runs are recorded in [`docs/E2E_RESULTS.md`](docs/E2E_RE
 ## Project structure
 
 ```
-app/                 FastAPI + LangGraph agent
+app/                 FastAPI + LangGraph agent (domain / application / infrastructure / presentation)
 frontend/            Vite React TypeScript operator console
   src/components/    layout, runs sidebar, timeline, approval, tools
+  src/features/      run + approval hooks (TanStack actions, active-run query)
   src/hooks/         SSE stream with reconnect + reducer
-  src/store/         Zustand UI state (theme, thinking phase)
+  src/store/         Zustand UI state only (theme, thinking phase)
 scenarios/           Curated incident scenarios
 runbooks/            Tool-backed runbook content
 evals/               Offline deterministic evaluation harness

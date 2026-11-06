@@ -1,4 +1,5 @@
 """Capture React operator-console screenshots into docs/screenshots/ (scripted provider)."""
+
 from __future__ import annotations
 
 import os
@@ -31,7 +32,7 @@ def main() -> int:
         "CHECKPOINT_DB_PATH": db.replace(".db", ".checkpoints.db"),
         "LLM_PROVIDER": "scripted",
         "REQUIRE_LLM": "false",
-        "SCRIPTED_DELAY_S": "0.15",
+        "SCRIPTED_DELAY_S": "0.6",
         "TOOL_BACKOFF_S": "0.01",
         "LOG_LEVEL": "WARNING",
     }
@@ -65,19 +66,34 @@ def main() -> int:
                 raise RuntimeError(f"never reached approval: {st.get('status')}")
 
         console_errors: list[str] = []
+        console_warnings: list[str] = []
+        expected_404_errors: list[str] = []
 
-        def on_console(msg):  # noqa: ANN001
-            if msg.type == "error":
-                console_errors.append(msg.text)
+        def observe(page, *, missing_run=False):
+            def on_console(msg):
+                if msg.type == "error":
+                    if missing_run and "404" in msg.text:
+                        expected_404_errors.append(msg.text)
+                    else:
+                        console_errors.append(msg.text)
+                elif msg.type == "warning":
+                    console_warnings.append(msg.text)
+
+            page.on("console", on_console)
+            page.on("pageerror", lambda exc: console_errors.append(str(exc)))
+
+        def verify_layout(page):
+            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "horizontal page overflow"
 
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             page = browser.new_page(viewport={"width": 1440, "height": 900}, color_scheme="light")
-            page.on("console", on_console)
+            observe(page)
             page.goto(base + "/", wait_until="networkidle")
             page.fill("#operator", "Alex Chen")
             page.wait_for_selector('[data-testid="empty-state"]', timeout=15000)
             page.wait_for_timeout(400)
+            verify_layout(page)
             page.screenshot(path=str(OUT / "01-empty.png"), full_page=True)
 
             # Running / thinking: start a fresh slow-ish run via UI
@@ -86,63 +102,72 @@ def main() -> int:
             page.wait_for_url("**/#/runs/**", timeout=15000)
             page.wait_for_selector('[data-testid="thinking-indicator"], [data-testid="approval-card"]', timeout=60000)
             if page.locator('[data-testid="thinking-indicator"]').count():
-                page.wait_for_timeout(300)
+                page.wait_for_selector('[data-testid="tool-card"]', timeout=30000)
+                page.wait_for_timeout(150)
                 page.screenshot(path=str(OUT / "02-running.png"), full_page=True)
 
             page.goto(base + f"/#/runs/{rid}", wait_until="networkidle")
             page.fill("#operator", "Alex Chen")
             page.wait_for_selector('[data-testid="approval-card"]', timeout=30000)
-            page.wait_for_timeout(500)
+            # Let the unrelated "triage started" toast dismiss before the approval reference shot.
+            page.wait_for_timeout(4500)
             page.screenshot(path=str(OUT / "approval-gate.png"), full_page=True)
             page.screenshot(path=str(OUT / "walkthrough-01-approval.png"), full_page=True)
+            for width in (375, 768, 1024):
+                page.set_viewport_size({"width": width, "height": 900})
+                page.wait_for_timeout(150)
+                verify_layout(page)
+                page.screenshot(path=str(OUT / f"approval-{width}.png"), full_page=True)
+            page.set_viewport_size({"width": 1440, "height": 900})
 
             page.click("#apOk")
             # Capture toast shortly after approve
             page.wait_for_timeout(500)
             page.screenshot(path=str(OUT / "05-toast.png"), full_page=True)
             page.wait_for_selector(".outcome", timeout=60000)
-            page.wait_for_timeout(600)
+            # Viewport matrix intentionally interrupted auto-follow; restore it for the finish reference.
+            latest = page.get_by_role("button", name="Jump to latest")
+            if latest.count():
+                latest.click()
+            page.wait_for_timeout(4500)
             page.screenshot(path=str(OUT / "resolved.png"), full_page=True)
             page.screenshot(path=str(OUT / "walkthrough-02-resolved.png"), full_page=True)
 
             page2 = browser.new_page(viewport={"width": 1440, "height": 900}, color_scheme="dark")
-            page2.on("console", on_console)
+            observe(page2)
             page2.add_init_script("localStorage.setItem('theme','dark')")
             page2.goto(base + f"/#/runs/{rid}")
             page2.fill("#operator", "Alex Chen")
             page2.wait_for_selector(".outcome", timeout=20000)
             page2.wait_for_timeout(400)
+            verify_layout(page2)
             page2.screenshot(path=str(OUT / "dark-mode.png"), full_page=True)
 
-            phone = browser.new_page(viewport={"width": 390, "height": 844}, color_scheme="light")
-            phone.on("console", on_console)
+            phone = browser.new_page(
+                viewport={"width": 390, "height": 844}, color_scheme="light", reduced_motion="reduce"
+            )
+            observe(phone)
             phone.goto(base + f"/#/runs/{rid}")
             phone.fill("#operator", "Alex Chen")
             phone.wait_for_selector(".outcome", timeout=20000)
             phone.wait_for_timeout(400)
+            verify_layout(phone)
             phone.screenshot(path=str(OUT / "03-mobile.png"), full_page=True)
 
             # Error state screenshot: navigate to bogus run
             err = browser.new_page(viewport={"width": 1440, "height": 900})
-            err.on("console", on_console)
+            observe(err, missing_run=True)
             err.goto(base + "/#/runs/run-does-not-exist")
             err.wait_for_timeout(1200)
             err.screenshot(path=str(OUT / "04-error.png"), full_page=True)
 
             browser.close()
 
+        print("console warnings:", console_warnings)
+        print("expected missing-run 404 console errors:", expected_404_errors)
+        print("unexpected console/page errors:", console_errors)
         if console_errors:
-            print("console errors:", console_errors)
-            # Filter benign noise + intentional 404 error-state navigation
-            serious = [
-                e
-                for e in console_errors
-                if "favicon" not in e.lower()
-                and "404" not in e
-                and "Failed to load resource" not in e
-            ]
-            if serious:
-                raise RuntimeError(f"JS console errors: {serious}")
+            raise RuntimeError(f"Unexpected console errors: {console_errors}")
 
         try:
             from PIL import Image

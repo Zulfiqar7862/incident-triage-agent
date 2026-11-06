@@ -1,7 +1,7 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useParams } from 'react-router-dom'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useParams, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { ErrorBanner } from '@/components/common/ErrorBanner'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import { RunViewSkeleton } from '@/components/common/Skeletons'
@@ -11,16 +11,13 @@ import { EmptyState } from '@/components/run/EmptyState'
 import { ReconnectBanner } from '@/components/run/ReconnectBanner'
 import { RunHeader } from '@/components/run/RunHeader'
 import { SidePanel } from '@/components/run/SidePanel'
-import { StepProgress } from '@/components/run/StepProgress'
 import { ThinkingIndicator } from '@/components/run/ThinkingIndicator'
 import { Timeline } from '@/components/run/Timeline'
 import { RunList } from '@/components/runs/RunList'
-import { useRunStream } from '@/hooks/useRunStream'
-import { createRun, fetchRun, fetchScenarios } from '@/lib/api'
+import { useActiveRun } from '@/features/run/hooks/useActiveRun'
+import { createRun, fetchScenarios } from '@/lib/api'
 import { mapError } from '@/lib/errors'
-import { ACTIVE } from '@/lib/types'
 import { useUiStore } from '@/store/uiStore'
-import { useNavigate } from 'react-router-dom'
 
 export function ConsolePage() {
   const { runId } = useParams()
@@ -29,26 +26,7 @@ export function ConsolePage() {
   const thinkingPhase = useUiStore((s) => s.thinkingPhase)
   const [ctxOpen, setCtxOpen] = useState(false)
 
-  const runQuery = useQuery({
-    queryKey: ['run', runId],
-    queryFn: () => fetchRun(runId!),
-    enabled: Boolean(runId),
-    refetchInterval: (q) => {
-      const st = q.state.data?.status
-      if (!st) return 2000
-      if (ACTIVE.includes(st) || st === 'awaiting_approval' || st === 'awaiting_input') return 1500
-      return false
-    },
-  })
-
-  const stream = useRunStream(runId || null)
-
-  useEffect(() => {
-    if (stream.events.length) {
-      void qc.invalidateQueries({ queryKey: ['run', runId] })
-      void qc.invalidateQueries({ queryKey: ['runs'] })
-    }
-  }, [stream.events.length, qc, runId])
+  const { runQuery, stream, run } = useActiveRun(runId)
 
   const startScenario = useMutation({
     mutationFn: async () => {
@@ -68,24 +46,32 @@ export function ConsolePage() {
     },
   })
 
-  const run = runQuery.data
-
   return (
-    <div className="flex h-full flex-col">
-      <a className="sr-only absolute left-0 top-0 z-50 -translate-y-full bg-[var(--color-elevated)] p-2 focus:translate-y-0" href="#traceCol">
-        Skip to live trace
+    <div className="console-shell flex flex-col">
+      <a className="skip-link" href="#console-content">
+        Skip to investigation
       </a>
       <AppHeader />
       {stream.reconnecting && stream.error ? (
         <ReconnectBanner message={stream.error} onReconnect={stream.reconnectNow} />
       ) : null}
-      <main className="app grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)_380px] max-[1150px]:grid-cols-[200px_minmax(0,1fr)] max-[1150px]:grid-rows-[minmax(0,1fr)_auto] max-[720px]:flex max-[720px]:flex-col">
+      <main
+        id="console-content"
+        tabIndex={-1}
+        className={`app workspace ${runId ? '' : 'workspace--empty'}`}
+      >
         <RunList selectedId={runId || null} />
         <ErrorBoundary>
-          <section className="col trace flex min-h-0 flex-col overflow-hidden" aria-live="polite" aria-label="Live reasoning trace">
+          <section
+            className="col trace flex min-h-0 flex-col overflow-hidden"
+            aria-label="Incident investigation"
+          >
             {!runId ? (
-              <div className="overflow-auto p-6">
-                <EmptyState onStartScenario={() => startScenario.mutate()} busy={startScenario.isPending} />
+              <div className="flex min-h-0 flex-1 overflow-auto">
+                <EmptyState
+                  onStartScenario={() => startScenario.mutate()}
+                  busy={startScenario.isPending}
+                />
               </div>
             ) : runQuery.isLoading ? (
               <RunViewSkeleton />
@@ -102,26 +88,22 @@ export function ConsolePage() {
               </div>
             ) : run ? (
               <>
-                <div className="shrink-0 px-6 pt-5 sm:px-8 sm:pt-6">
+                <div className="incident-overview">
                   <RunHeader run={run} />
-                  <StepProgress
-                    status={run.status}
-                    step={run.step}
-                    plan={run.plan}
-                    hasResult={Boolean(run.result)}
-                  />
                   <ThinkingIndicator status={run.status} phase={thinkingPhase} step={run.step} />
                 </div>
-                <Timeline events={stream.events} />
+                <Timeline events={stream.events} status={run.status} />
               </>
             ) : null}
           </section>
         </ErrorBoundary>
         {run ? (
-          <SidePanel run={run} onRefresh={() => void runQuery.refetch()} onInspectContext={() => setCtxOpen(true)} />
-        ) : (
-          <aside className="border-l border-[var(--color-border)] bg-[var(--color-elevated)] p-4 text-sm text-[var(--color-fg-tertiary)] max-[1150px]:col-span-full max-[1150px]:border-l-0 max-[1150px]:border-t" />
-        )}
+          <SidePanel
+            run={run}
+            onRefresh={() => void runQuery.refetch()}
+            onInspectContext={() => setCtxOpen(true)}
+          />
+        ) : null}
       </main>
       {runId ? <ContextInspector runId={runId} open={ctxOpen} onOpenChange={setCtxOpen} /> : null}
     </div>
