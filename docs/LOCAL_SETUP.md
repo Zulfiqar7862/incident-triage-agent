@@ -1,7 +1,15 @@
 # Run the supplied source locally
 
-This is the full working-tree source snapshot, not a new Git commit. Extract the
-ZIP and open its `incident-agent` directory. No `.git` directory is included.
+For the published repository, clone and enter the checkout:
+
+```bash
+git clone https://github.com/Zulfiqar7862/incident-triage-agent.git
+cd incident-triage-agent
+```
+
+If you received a source ZIP instead, extract it and open its `incident-agent`
+directory. The archive has no `.git` directory; the install/run steps below work
+for either distribution.
 Use Bash on Linux/macOS (or WSL on Windows). Python 3.12/3.13 and Node 22.12+ or
 24 LTS are the intended versions; this release was exercised on Linux with Python
 3.13.5, Node 24.22.1, and npm 11.21.1. CI configuration targets Python 3.12 / Node 22.

@@ -1,15 +1,17 @@
 # Incident Triage Agent
 
-A governed production agent for live incident response — not a chatbot wrapper.
+A governed autonomous agent for incident investigation and remediation — not a chatbot wrapper.
 
 **What this is evaluated on**
 
 1. **Autonomy** — plans the investigation, calls typed tools, retries transient failures, and finishes with a verified incident report.
 2. **State / context** — every step is checkpointed (LangGraph + Store CAS); interrupted runs resume after crash or restart, including mid-approval.
-3. **Operator UX** — React console streams the reasoning trace over SSE; operators approve / reject / edit writes, message the agent, pause, resume, or emergency-stop.
+3. **Operator UX** — React console streams investigation progress over SSE; operators approve / reject / edit writes, message the agent, pause, resume, or emergency-stop.
 4. **Backend API** — FastAPI runtime for runs, tools, durable state, metrics, audit hash-chain verify, and the live event stream.
 
-The agent plans an investigation, calls tools (metrics, logs, deploys, runbooks), recovers from tool and model failures, and **stops at a human approval gate before any production mutation**. Run state and context are checkpointed so work resumes after a crash. Operators watch the live reasoning trace over SSE, intervene with messages or edits, and approve or reject proposed changes. The backend exposes a FastAPI runtime for runs, tools, durable state, metrics, and the event stream.
+The agent plans an investigation, calls tools (metrics, logs, deploys, runbooks), recovers from tool and model failures, and **stops at a human approval gate before any mutating tool runs**. Run state and context are checkpointed so work resumes after a crash. Operators watch live investigation progress over SSE, intervene with messages or edits, and approve or reject proposed changes. The backend exposes a FastAPI runtime for runs, tools, durable state, metrics, and the event stream.
+
+**Platform scope:** the supplied tools operate on a simulated cluster, including when using a live model. This repository is ready for local evaluation; connecting real infrastructure and deploying it securely requires production adapters and deployment-specific access controls.
 
 ![Empty console](docs/screenshots/01-empty.png)
 
@@ -74,7 +76,7 @@ flowchart TD
 | `app/store.py` | Sync Store facade (UI/SSE source of truth) with checkpoint CAS |
 | `app/observability/` | structlog, OTel GenAI spans, Prometheus `/metrics`, optional Langfuse |
 | `app/main.py` | Thin HTTP presentation: auth, CORS, CSP, health/metrics, SSE, SPA |
-| `docs/LOCAL_SETUP.md` | Archive-friendly setup, tests, and release limitations |
+| `docs/LOCAL_SETUP.md` | Git checkout / archive setup, tests, and release limitations |
 | `.claude/skills/` | Pinned project-local frontend design/testing guidance and licenses |
 | `scripts/quickstart.sh` | One-command local boot (Python + frontend build + uvicorn) |
 
