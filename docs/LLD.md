@@ -2,8 +2,13 @@
 
 Companion documents: [High-Level Design](HLD.md) · [Architecture review guide](ARCHITECTURE_REVIEW.md) · [PyCharm demo](PYCHARM_DEMO.md)
 
-Line anchors refer to the commit that introduced this document; file paths are
-the stable reference.
+Line anchors (`#L52`) match the current `main`; if code moves, file paths and
+symbol names are the stable reference.
+
+Contents: 1 Project structure · 2 Layers · 3 Key types (class diagram) · 4 LangGraph
+graph · 5 Run lifecycle (state machine) · 6 Sequences · 7 Tool registry · 8 Data
+model (ER) · 9 HTTP API · 10 Events and hash chain · 11 Frontend · 12 Errors and
+retries · 13 Configuration · 14 Testing · 15 Design patterns · 16 SOLID
 
 ## 1. Project structure
 
@@ -500,3 +505,76 @@ Invalid values raise `ConfigError` at startup.
 | Scenario outcomes (resolved, right first fix, injection-safe) | [`evals/run_evals.py`](../evals/run_evals.py) |
 | Frontend units (Vitest) | `*.test.ts(x)` under [`frontend/src`](../frontend/src) |
 | Browser end to end (Playwright) | [`scripts/e2e_ui.py`](../scripts/e2e_ui.py) |
+
+## 15. Design patterns
+
+Only patterns present in the code are listed. Excerpts and the test that guards
+each one are in the [architecture review guide](ARCHITECTURE_REVIEW.md#2-design-patterns-in-the-code).
+
+```mermaid
+classDiagram
+  direction LR
+  class LLMPort {
+    <<Protocol>>
+    complete()
+  }
+  class GeminiLLM
+  class AnthropicLLM
+  class OpenAILLM
+  class ScriptedPolicy
+  class GeminiWithFallback {
+    -_primary: GeminiLLM
+    -_fallback: GeminiLLM
+    complete()
+  }
+  class LLMGateway {
+    complete() retries + span
+  }
+  class make_llm {
+    <<factory>>
+  }
+  class RunService {
+    <<facade>>
+  }
+  class Runtime {
+    <<composition root>>
+  }
+  GeminiLLM ..|> LLMPort : Strategy
+  AnthropicLLM ..|> LLMPort : Strategy
+  OpenAILLM ..|> LLMPort : Strategy
+  ScriptedPolicy ..|> LLMPort : Strategy
+  GeminiWithFallback ..|> LLMPort : Decorator
+  GeminiWithFallback o-- GeminiLLM : wraps
+  LLMGateway o-- LLMPort : wraps
+  make_llm ..> LLMPort : creates
+  RunService o-- LLMGateway
+  Runtime --|> RunService : injects adapters
+```
+
+| Pattern | Where | What it buys |
+| --- | --- | --- |
+| Ports and adapters | Ports [`app/domain/ports.py`](../app/domain/ports.py#L17); adapters [`Store`](../app/infrastructure/store.py#L62), [`MockCluster`](../app/infrastructure/mock_cluster.py#L61), [`app/llm/providers.py`](../app/llm/providers.py) | Storage, platform, and model are replaceable without touching use cases |
+| Strategy | [`LLMPort`](../app/domain/ports.py#L18) implemented by [`GeminiLLM`](../app/llm/providers.py#L156), [`AnthropicLLM`](../app/llm/providers.py#L231), [`OpenAILLM`](../app/llm/providers.py#L292), [`ScriptedPolicy`](../app/llm/scripted.py#L76) | Live and offline models interchangeable |
+| Factory | [`make_llm`](../app/llm/providers.py#L421), [`cluster_for_run`](../app/infrastructure/cluster.py#L9), [`open_checkpointer`](../app/infrastructure/checkpointer.py#L14), [`new_run_state`](../app/agent/state.py#L55) | Construction in one place; callers receive a port |
+| Adapter | [`MockCluster`](../app/infrastructure/mock_cluster.py#L61) (scenario JSON → `ClusterPort`); [`to_gemini`](../app/llm/providers.py#L89) / [`to_anthropic`](../app/llm/providers.py#L194) / [`to_openai`](../app/llm/providers.py#L270) (neutral history → wire format) | One internal model, many external formats |
+| Decorator | [`GeminiWithFallback`](../app/llm/providers.py#L343) (quota fallback), [`LLMGateway`](../app/application/llm_gateway.py#L17) (retries + tracing) | Behaviour added without changing the wrapped class |
+| Dependency injection / composition root | [`RunService.__init__`](../app/application/run_service.py#L59), [`Runtime`](../app/runtime.py#L35), [`create_app`](../app/main.py#L45), [`get_runtime`](../app/presentation/http/dependencies.py#L14) | No hidden globals; tests pass fakes |
+| Facade | [`RunService`](../app/application/run_service.py#L52): `create_run`, `approve`, `reject`, `pause`, `resume`, `cancel`, `emergency_stop` | One entry point for the HTTP layer |
+| Observer | [`RunEventRecorder.emit`](../app/application/events.py#L24) → event log → [SSE route](../app/presentation/http/routes.py#L132) → `EventSource` in [`useRunStream`](../frontend/src/features/run/hooks/useRunStream.ts) | Producers decoupled from the UI; replay by `Last-Event-ID` |
+| Registry | [`TOOLS`](../app/tools/specs.py#L215) of [`ToolSpec`](../app/tools/specs.py#L92) | New tool = new entry |
+| State machine | Section 5 statuses; LangGraph [`StateGraph`](../app/agent/graph.py) with `interrupt()` | Explicit transitions and durable human gates |
+| Repository + optimistic locking | [`Store.save`](../app/infrastructure/store.py#L97) compare-and-set on `checkpoint_version` | Lost updates detected (HTTP 409) |
+| Hash chain | [`Store._event_hash`](../app/infrastructure/store.py#L162), [`verify_event_chain`](../app/infrastructure/store.py#L211) | Tamper-evident audit log |
+| Policy object | [`evaluate_write_confidence`](../app/domain/policy.py#L36) → `WriteGateDecision` | Pure, unit-testable governance rule |
+| Reducer / custom hooks / query-key factory (frontend) | [`streamReducer`](../frontend/src/features/run/hooks/useRunStream.ts), [`useRunActions`](../frontend/src/features/run/hooks/useRunActions.ts#L10), [`queryKeys`](../frontend/src/lib/queryKeys.ts#L2) | Side effects out of components; cache keys defined once |
+
+## 16. SOLID
+
+| Principle | Where it shows | Guarded by |
+| --- | --- | --- |
+| Single responsibility | `RunEventRecorder` records events; `ToolExecutor` runs and records tools; `LLMGateway` retries model calls; routes only translate HTTP | Exercised through `RunService` in `tests/test_agent.py` and `tests/test_hardening.py`; `test_routes_are_not_defined_in_the_composition_root` |
+| Open/closed | New platform = new `ClusterPort` passed as `cluster_factory`; new tool = new `ToolSpec`; new error = one row in [`STATUS_BY_ERROR`](../app/presentation/http/errors.py#L11) | `test_adapters_implement_domain_ports` |
+| Liskov substitution | Every LLM adapter, including `GeminiWithFallback` and test fakes, is used through `LLMPort` | `test_adapters_implement_domain_ports`, `test_quota_error_switches_to_fallback_model` |
+| Interface segregation | Nodes see [`AgentRuntimePort`](../app/application/ports.py#L28); the run view needs only [`RunViewSource`](../app/presentation/run_view.py#L11) (two methods) | `test_runtime_satisfies_agent_runtime_port` |
+| Dependency inversion | [`RunService.__init__`](../app/application/run_service.py#L59) depends on `RunStorePort`, `LLMPort`, factories; concrete classes chosen in `Runtime` | `test_application_layer_depends_on_ports_not_adapters` |
+

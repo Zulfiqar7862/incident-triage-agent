@@ -208,7 +208,7 @@ Health: `GET /healthz`, readiness: `GET /readyz`, metrics: `GET /metrics`. One u
 GitHub Actions (`.github/workflows/ci.yml`) and GitLab CI (`.gitlab-ci.yml`):
 
 1. **test** — ruff, mypy, architecture boundary tests, pytest, scripted evals; Playwright UI E2E (offline scenario + no console errors)
-2. **frontend** — `npm ci`, lint (oxlint), typecheck (`tsc -b`), Vitest, production build
+2. **frontend** — `npm ci`, lint (oxlint), Prettier check, typecheck (`tsc -b`), Vitest, production build
 3. **docker** — multi-stage image build (needs test + frontend)
 
 ---

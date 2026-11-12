@@ -4,8 +4,8 @@ For reviewers: each claim below points to the code that implements it and to the
 automated check that proves it. Run every check locally with the commands in
 [section 6](#6-run-the-proof-yourself). Design context: [HLD](HLD.md), [LLD](LLD.md).
 
-Line anchors are accurate for the commit that added this guide; file paths and
-symbol names are the stable reference.
+Line anchors match the current `main`; if code moves, file paths and symbol names
+are the stable reference.
 
 ## 1. Project structure and responsibilities
 
@@ -60,7 +60,7 @@ Only patterns that exist in the code are listed.
 | Dependency injection / composition root | [`RunService.__init__`](../app/application/run_service.py#L59) takes ports and factories; [`Runtime`](../app/runtime.py#L35) and [`create_app`](../app/main.py#L45) choose adapters; routes get the service via FastAPI `Depends(get_runtime)` ([`dependencies.py`](../app/presentation/http/dependencies.py#L14)) | No global singletons; tests pass fakes |
 | Facade | `RunService` exposes `create_run`, `approve`, `pause`, … over the graph, gateway, executor, and recorder | One entry point for presentation |
 | Observer (publish / subscribe over a log) | [`RunEventRecorder.emit`](../app/application/events.py#L24) appends to the event log; the SSE route tails it ([`routes.py#L131`](../app/presentation/http/routes.py#L131)); the browser subscribes with `EventSource` ([`useRunStream.ts`](../frontend/src/features/run/hooks/useRunStream.ts)) | Producers and the UI are decoupled; replay from `Last-Event-ID` |
-| Registry | [`TOOLS`](../app/tools/specs.py#L215) maps tool name → `ToolSpec` (schema, kind, handler); dispatch by `spec.kind` in [`act_node`](../app/agent/nodes/act.py#L119) | Add a tool by adding an entry |
+| Registry | [`TOOLS`](../app/tools/specs.py#L215) maps tool name → `ToolSpec` (schema, kind, handler); dispatch by `spec.kind` in `act_node` ([`act.py#L119`](../app/agent/nodes/act.py#L119)) | Add a tool by adding an entry |
 | State machine | Run statuses ([`lifecycle.py`](../app/domain/lifecycle.py), [LLD §5](LLD.md#5-run-lifecycle)) and the LangGraph `StateGraph` ([`graph.py`](../app/agent/graph.py)) | Explicit legal transitions; interrupts at human gates |
 | Repository with optimistic locking | `Store.save` compare-and-set on `checkpoint_version` ([`store.py#L97`](../app/infrastructure/store.py#L97)) | Detect lost updates between the drive task and operator actions |
 | Hash chain | `Store._event_hash` / `verify_event_chain` ([`store.py#L162`](../app/infrastructure/store.py#L162)) | Tamper-evident audit log |
@@ -198,6 +198,7 @@ def __init__(
 | Budgets and loop guard stop runaway runs | `prepare_node`, `LoopGuard` | `test_step_budget_stops_runaway_loops`, `test_hard_budget_stop_cancels`, `test_budget_alert_emitted_before_hard_stop`, `test_loop_guard_stops_identical_retries` |
 | Audit log is hash-chained and detects edits | `Store.append_event`, `verify_event_chain` | `test_event_hash_chain_verifies_and_detects_tamper` |
 | Prompt injection in tool output is flagged, not followed | `ToolExecutor.record` | `test_injection_in_logs_is_flagged_and_not_executed`, eval scenario `cache-oom-injection` |
+| Every tool result is counted in Prometheus (`agent_tool_calls_total`) | `ToolExecutor.record` | `tests/test_hardening.py::test_tool_calls_are_counted_in_prometheus` |
 | Operator view never shows raw code or logs | `app/presentation/operator.py` | `tests/test_display.py` (6 tests), `scripts/e2e_ui.py` |
 | API auth, headers, limits, 429 | `app/presentation/http/` | `tests/test_production.py` |
 | Agent resolves the scenarios correctly | whole system | `python -m evals.run_evals --provider scripted` (3/3) |
@@ -208,12 +209,12 @@ def __init__(
 - The platform is simulated (`MockCluster`); no live cluster adapter exists yet.
 - The Store is SQLite only; `DATABASE_URL` moves only the LangGraph checkpointer to Postgres.
 - One process, one worker; no distributed run leases.
-- Graph nodes import `present_tool` from `app/tools/display.py` to add
-  plain-language labels to `tool.call` events, so that labelling logic lives in the
-  tools package rather than in presentation. Moving it would change where event
-  payloads are built, so it was left as is.
-- The Langfuse client is configured but generations are not sent yet; the
-  `agent_tool_calls_total` metric is defined but not incremented.
+- Plain-language tool labels (`present_tool`, [`app/tools/display.py`](../app/tools/display.py))
+  live in the tool catalog, next to the tool definitions, because graph nodes
+  attach them to `tool.call` events. The module imports only the domain, so the
+  layer rules hold; it is a placement choice, not a boundary violation.
+- The Langfuse client is configured but generations are not sent yet (OpenTelemetry
+  spans and Prometheus metrics are the active telemetry).
 - Emergency stop is available through the API, not as a console button.
 
 ## 6. Run the proof yourself

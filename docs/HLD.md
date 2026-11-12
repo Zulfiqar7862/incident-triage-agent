@@ -214,7 +214,7 @@ to the database file can rewrite the whole chain.
   over OTLP/HTTP when `OTLP_ENDPOINT` is set ([`app/observability/tracing.py`](../app/observability/tracing.py)).
   Span attributes are also stored as `gen_ai.span` events.
 - **Metrics:** Prometheus at `/metrics`: LLM calls, tokens, cost, latency,
-  approvals, runs by status, events by type ([`app/observability/metrics.py`](../app/observability/metrics.py)).
+  tool calls (by tool and error), approvals, runs by status, events by type ([`app/observability/metrics.py`](../app/observability/metrics.py)).
 - **Langfuse:** a client is created when both keys are set. The runtime does not
   yet send generations to it (`trace_generation` exists but is not called).
 
@@ -261,3 +261,8 @@ handlers.
 | Write actions only through approval | No autonomous production mutation | Every fix needs a human click |
 | Backend-owned operator projections | UI shows plain language; raw evidence stays intact for engineers | Projection code must track tool output shapes |
 | Single worker | Simple run ownership | Horizontal scale needs leases |
+
+Design patterns (Strategy, Factory, Adapter, Decorator, Facade, Observer, ports and
+adapters, dependency injection) and SOLID are mapped to code in
+[LLD sections 15–16](LLD.md#15-design-patterns) and, with excerpts and tests, in the
+[architecture review guide](ARCHITECTURE_REVIEW.md).
