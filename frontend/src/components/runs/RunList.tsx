@@ -1,16 +1,11 @@
-import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { RunListSkeleton } from '@/components/common/Skeletons'
 import { StatusBadge } from '@/components/ui/badge'
-import { fetchRuns } from '@/lib/api'
+import { useRuns } from '@/features/run/hooks/queries'
 import { cn } from '@/lib/utils'
 
 export function RunList({ selectedId }: { selectedId: string | null }) {
-  const q = useQuery({
-    queryKey: ['runs'],
-    queryFn: fetchRuns,
-    refetchInterval: 4000,
-  })
+  const q = useRuns()
 
   return (
     <nav

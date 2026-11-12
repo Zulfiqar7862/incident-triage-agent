@@ -159,26 +159,10 @@ def present_tool(name: str, args: Mapping[str, Any] | None = None, *, kind: str 
     }
 
 
-def enrich_pending(pending: dict[str, Any]) -> dict[str, Any]:
-    """Attach title/summary to a pending approval/input dict (mutates a copy)."""
-    out = dict(pending)
-    name = str(out.get("tool") or "")
-    args = out.get("args") if isinstance(out.get("args"), dict) else {}
-    ui = present_tool(name, args)
-    out.setdefault("title", ui["title"])
-    out.setdefault("summary", ui["summary"])
-    out.setdefault("risk", ui["risk"])
-    from app.presentation.operator import pending_display
-
-    out["operator"] = pending_display(out)
-    return out
-
-
 __all__ = [
     "tool_label",
     "describe_tool",
     "present_tool",
-    "enrich_pending",
     "SEVERITY_WORDS",
     "STATUS_WORDS",
     "severity_words",
@@ -187,16 +171,3 @@ __all__ = [
     "plain_task_from_alert",
     "alert_card",
 ]
-
-
-def present_report(
-    result: Mapping[str, Any], history: list[dict] | None = None, applied: Mapping[str, Any] | None = None
-) -> dict[str, Any]:
-    """Add a verified-data projection; never rewrite arbitrary model text."""
-    from app.presentation.operator import report_display
-
-    display = report_display(result, history or [], applied)
-    applied_label = next(
-        (f["value"] for f in display["fields"] if f["label"] == "Applied change"), "No verified change recorded"
-    )
-    return {**result, "operator": display, "operator_summary": display["summary"], "fix_summary": applied_label}

@@ -16,32 +16,20 @@ from __future__ import annotations
 import json
 import os
 import uuid
-from dataclasses import dataclass, field
 
 import httpx
 
 from app.config import ConfigError, Settings
+from app.domain.llm import LLMError, LLMResponse, LLMTransientError, ToolCall
 
-
-@dataclass
-class ToolCall:
-    id: str
-    name: str
-    args: dict
-
-
-@dataclass
-class LLMResponse:
-    text: str
-    tool_calls: list[ToolCall] = field(default_factory=list)
-    input_tokens: int = 0
-    output_tokens: int = 0
-    model: str = ""
-    raw: dict | None = None  # provider data to replay on the next request
-
-
-class LLMError(Exception):
-    """Non-retryable (bad request, auth, safety block)."""
+__all__ = [
+    "LLMError",
+    "LLMResponse",
+    "LLMTransientError",
+    "ToolCall",
+    "make_llm",
+    "resolve_provider",
+]
 
 
 RETRYABLE_STATUS = (408, 409, 429, 500, 502, 503, 504, 529)
@@ -49,14 +37,6 @@ RETRYABLE_STATUS = (408, 409, 429, 500, 502, 503, 504, 529)
 
 def _client(timeout: float, transport: httpx.AsyncBaseTransport | None) -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=10.0), transport=transport)
-
-
-class LLMTransientError(Exception):
-    """Rate limit, overload, timeout: the runtime retries with backoff."""
-
-    def __init__(self, message: str, retry_after_s: float | None = None):
-        super().__init__(message)
-        self.retry_after_s = retry_after_s
 
 
 def _retry_after_seconds(response: httpx.Response) -> float | None:
@@ -472,6 +452,6 @@ def make_llm(settings: Settings, transport: httpx.AsyncBaseTransport | None = No
             settings.llm_max_output_tokens,
             transport,
         )
-    from app.scripted import ScriptedPolicy
+    from app.llm.scripted import ScriptedPolicy
 
     return ScriptedPolicy(delay_s=settings.scripted_delay_s)

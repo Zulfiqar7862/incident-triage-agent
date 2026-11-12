@@ -1,4 +1,4 @@
-"""In-process simulated platform (ClusterPort adapter).
+"""In-process simulated platform: the ``ClusterPort`` adapter used today.
 
 The agent does not hold production cluster credentials. Each scenario under
 /scenarios describes services, deploy history, metrics, logs, and which
@@ -16,19 +16,15 @@ from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
 
+from app.domain.errors import ToolError, ToolTransientError
 from app.domain.labels import alert_card
+from app.infrastructure.runbooks import search_runbooks
 
-SCENARIO_DIR = Path(__file__).resolve().parent.parent / "scenarios"
+__all__ = ["MockCluster", "ToolError", "ToolTransientError", "list_scenarios", "load_scenario"]
+
+SCENARIO_DIR = Path(__file__).resolve().parents[2] / "scenarios"
 NOW = datetime(2026, 11, 3, 14, 30, 0, tzinfo=UTC)  # fixed "now" keeps output deterministic
 POD_SUFFIXES = ["7f9c4-a1b2", "7f9c4-c3d4", "7f9c4-e5f6"]
-
-
-class ToolError(Exception):
-    """A permanent failure the agent should read and adapt to (bad args, unknown service)."""
-
-
-class ToolTransientError(Exception):
-    """A transient failure (timeout, 5xx). The runtime retries these with backoff."""
 
 
 def _ts(minutes_ago: float) -> str:
@@ -70,6 +66,10 @@ class MockCluster:
         env.setdefault("calls", {})
 
     # ---- internals --------------------------------------------------------------
+    def validate_service(self, name: str) -> None:
+        """ClusterPort: raise ToolError when ``name`` is not a known service."""
+        self._svc(name)
+
     def _svc(self, name: str) -> dict:
         try:
             return self.s["services"][name]
@@ -217,6 +217,10 @@ class MockCluster:
             "deploys": deploys,
             "actions_during_this_incident": agent_actions,
         }
+
+    def search_runbooks(self, query: str, top_k: int = 2) -> list[dict]:
+        """Runbook knowledge base lookup (local markdown files)."""
+        return search_runbooks(query, top_k)
 
     # ---- write tools (idempotent by action_id) ---------------------------------------
     def _apply(self, tool: str, args: dict, action_id: str, message: str) -> dict:

@@ -14,6 +14,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Literal, NotRequired, TypedDict
 
 from app.domain.labels import status_words
+from app.tools.display import present_tool
 
 
 class DisplayField(TypedDict):
@@ -356,3 +357,28 @@ def error_display(status: int) -> OperatorDisplay:
         429: ("Please wait", "The service cannot accept more work right now. Try again shortly."),
     }.get(status, ("Service unavailable", "The request could not be completed. Please try again."))
     return view(title, summary)
+
+
+# ---- additive projections attached to API payloads ---------------------------------
+def enrich_pending(pending: dict[str, Any]) -> dict[str, Any]:
+    """Attach title/summary to a pending approval/input dict (mutates a copy)."""
+    out = dict(pending)
+    name = str(out.get("tool") or "")
+    args = out.get("args") if isinstance(out.get("args"), dict) else {}
+    ui = present_tool(name, args)
+    out.setdefault("title", ui["title"])
+    out.setdefault("summary", ui["summary"])
+    out.setdefault("risk", ui["risk"])
+    out["operator"] = pending_display(out)
+    return out
+
+
+def present_report(
+    result: Mapping[str, Any], history: list[dict] | None = None, applied: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
+    """Add a verified-data projection; never rewrite arbitrary model text."""
+    display = report_display(result, history or [], applied)
+    applied_label = next(
+        (f["value"] for f in display["fields"] if f["label"] == "Applied change"), "No verified change recorded"
+    )
+    return {**result, "operator": display, "operator_summary": display["summary"], "fix_summary": applied_label}

@@ -6,9 +6,9 @@ import asyncio
 
 from app.agent.graph import build_agent_graph, graph_mermaid
 from app.config import Settings
+from app.infrastructure.store import Store
+from app.llm.scripted import ScriptedPolicy
 from app.runtime import Runtime
-from app.scripted import ScriptedPolicy
-from app.store import Store
 
 
 def test_graph_mermaid_mentions_gates():

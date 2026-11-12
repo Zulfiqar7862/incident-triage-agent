@@ -1,7 +1,7 @@
 import { ShieldAlert } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { OperatorFacts } from './OperatorFacts'
+import { OperatorFacts } from '@/components/run/OperatorFacts'
 import { Button } from '@/components/ui/button'
 import { mapError, humanizeKey } from '@/lib/errors'
 import { FIELD_LABELS, confidencePhrase } from '@/lib/format'

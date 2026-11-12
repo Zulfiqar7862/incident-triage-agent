@@ -6,12 +6,14 @@ import asyncio
 import time
 
 from app.config import Settings
+from app.infrastructure.store import Store
 from app.llm import LLMResponse, ToolCall
+from app.llm.scripted import ScriptedPolicy
 from app.main import create_app
+from app.presentation.operator import enrich_pending
+from app.presentation.run_view import present_run
 from app.runtime import Runtime
-from app.scripted import ScriptedPolicy
-from app.store import Store
-from app.tools.display import enrich_pending, present_tool
+from app.tools.display import present_tool
 from fastapi.testclient import TestClient
 
 
@@ -53,7 +55,7 @@ def test_approval_payload_includes_risk_and_summary(tmp_path):
         rt = Runtime(store, ScriptedPolicy(delay_s=0), settings)
         rid = rt.create_run("db-pool-regression")["run_id"]
         st = await _wait(store, rid, {"awaiting_approval"})
-        p = rt.public(st)["pending"]
+        p = present_run(rt, st)["pending"]
         assert p["risk"] == "high"
         assert p.get("title") and p.get("summary")
         req = next(e for e in store.events_since(rid, 0, limit=10_000) if e["type"] == "approval.requested")
@@ -188,7 +190,7 @@ def test_emergency_stop_and_verify_http(tmp_path):
 
 def test_public_alert_card_has_no_pcodes(tmp_path):
     from app.agent.state import make_run_id, new_run_state
-    from app.mock_env import load_scenario
+    from app.infrastructure.mock_cluster import load_scenario
 
     settings = Settings(db_path=str(tmp_path / "a.db"), tool_backoff_s=0.01)
     store = Store(settings.db_path)
@@ -196,7 +198,7 @@ def test_public_alert_card_has_no_pcodes(tmp_path):
     scenario = load_scenario("db-pool-regression")
     st = new_run_state(make_run_id(), scenario, settings)
     store.create_run(st)
-    pub = rt.public(st)
+    pub = present_run(rt, st)
     assert "ALRT" not in pub["task"]
     assert "P1" not in pub["task"]
     assert pub["alert"]["severity"] == "Critical"

@@ -7,10 +7,10 @@ import time
 
 import pytest
 from app.config import Settings
+from app.infrastructure.store import Store
+from app.llm.scripted import ScriptedPolicy
 from app.main import create_app
 from app.runtime import Runtime, TooBusy
-from app.scripted import ScriptedPolicy
-from app.store import Store
 from fastapi.testclient import TestClient
 
 TOKEN = "s3cret-token-for-tests-0123"

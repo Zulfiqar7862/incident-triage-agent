@@ -1,4 +1,4 @@
-"""Hardening added for the ITP bar: loop guard, injection flag, runbooks, budgets, spans."""
+"""Hardening: loop guard, injection flag, runbooks, budgets, spans."""
 
 from __future__ import annotations
 
@@ -6,13 +6,13 @@ import asyncio
 import time
 
 from app.config import Settings
-from app.guards import find_injection_markers
+from app.domain.guards import find_injection_markers
+from app.infrastructure.runbooks import search_runbooks
+from app.infrastructure.store import Store
 from app.llm import LLMResponse, ToolCall
+from app.llm.scripted import ScriptedPolicy
 from app.main import create_app
-from app.runbooks import search_runbooks
 from app.runtime import Runtime
-from app.scripted import ScriptedPolicy
-from app.store import Store
 from fastapi.testclient import TestClient
 
 

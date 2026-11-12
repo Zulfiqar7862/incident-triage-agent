@@ -17,9 +17,9 @@ import time
 import httpx
 import pytest
 from app.config import ConfigError, Settings
+from app.infrastructure.store import Store
 from app.llm import GEMINI_DUMMY_SIGNATURE, GeminiLLM, LLMError, make_llm, to_gemini
 from app.runtime import Runtime
-from app.store import Store
 
 KEY = "test-gemini-key"
 REASON = "Deploy v2.14.0 set DB_POOL_SIZE 50 -> 5; logs show pool exhaustion timeouts"

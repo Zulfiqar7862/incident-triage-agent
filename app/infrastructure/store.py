@@ -15,6 +15,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from app.application.exceptions import ConcurrencyConflict
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
     id TEXT PRIMARY KEY,
@@ -53,7 +55,7 @@ CREATE TABLE IF NOT EXISTS memories (
 """
 
 
-class CheckpointConflict(Exception):
+class CheckpointConflict(ConcurrencyConflict):
     """Optimistic concurrency failure: another writer advanced checkpoint_version."""
 
 

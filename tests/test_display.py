@@ -6,17 +6,17 @@ from copy import deepcopy
 
 import pytest
 from app.config import Settings
+from app.llm.scripted import ScriptedPolicy
 from app.main import create_app
 from app.presentation.operator import (
     event_display,
     pending_display,
     present_event,
+    present_report,
     report_display,
     run_display,
     tool_result_display,
 )
-from app.scripted import ScriptedPolicy
-from app.tools.display import present_report
 from fastapi.testclient import TestClient
 
 RAW = "DB_POOL_SIZE 50→5 ERROR POST /api/checkout TimeoutError rollback_deploy(service=x) Traceback"

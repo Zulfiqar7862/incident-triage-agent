@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from typing import Any
 
+from app.application.ports import PendingPresenter
+from app.domain.errors import ToolError
+from app.domain.llm import ToolCall
 from app.domain.policy import evaluate_write_confidence
-from app.llm import ToolCall
-from app.tools import TOOLS, ToolArgsError, ToolSpec, enrich_pending
+from app.tools import TOOLS, ToolArgsError, ToolSpec
 
 
 def build_gate_or_block(
@@ -17,16 +20,16 @@ def build_gate_or_block(
     step: int,
     *,
     min_write_confidence: float,
-    resolve_service: Any,
-    emit: Any,
+    resolve_service: Callable[[str], Any],
+    emit: Callable[[dict, str, dict], None],
+    present_pending: PendingPresenter = dict,
 ) -> dict | tuple[str, bool, dict]:
     """Return enriched pending dict, or (error_content, is_error, meta) tuple.
 
     ``resolve_service(service_name)`` raises ToolError for unknown services.
     ``emit(st, type, payload)`` records policy blocks.
+    ``present_pending`` attaches operator-facing fields (injected by the composition root).
     """
-    from app.mock_env import ToolError
-
     try:
         args = spec.parse(call.args).model_dump()
     except ToolArgsError as e:
@@ -71,7 +74,7 @@ def build_gate_or_block(
             "requested_at": time.time(),
             "executing": False,
         }
-        return enrich_pending(pending)
+        return present_pending(pending)
 
     pending = {
         "kind": "input",
@@ -82,7 +85,7 @@ def build_gate_or_block(
         "step": step,
         "requested_at": time.time(),
     }
-    return enrich_pending(pending)
+    return present_pending(pending)
 
 
 def tool_spec(name: str) -> ToolSpec:

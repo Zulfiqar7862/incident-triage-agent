@@ -9,17 +9,14 @@ from typing import Any
 from langchain_core.runnables import RunnableConfig
 from langgraph.types import interrupt
 
-from app.llm import ToolCall
+from app.application.tool_executor import format_tool_output
+from app.domain.llm import ToolCall
 from app.tools import TOOLS, ToolArgsError, present_tool
-
-
-def _fmt(out) -> str:
-    return out if isinstance(out, str) else json.dumps(out, indent=1, ensure_ascii=False)
 
 
 async def approval_node(state: dict, config: RunnableConfig) -> dict[str, Any]:
     from app.agent.deps import runtime_from
-    from app.mock_env import ToolError
+    from app.domain.errors import ToolError
 
     rt = runtime_from(config)
     st = rt.get(state["run_id"])
@@ -39,7 +36,7 @@ async def approval_node(state: dict, config: RunnableConfig) -> dict[str, Any]:
         rt.store.save(st)
         return st
 
-    if rt._tool_result_recorded(st, p["tool_call_id"]):
+    if rt.tool_result_recorded(st, p["tool_call_id"]):
         st["pending"] = None
         st["route"] = "continue"
         rt.store.save(st)
@@ -60,7 +57,7 @@ async def approval_node(state: dict, config: RunnableConfig) -> dict[str, Any]:
                 "at": time.time(),
             }
         )
-        rt._emit(
+        rt.emit(
             st,
             "approval.decided",
             {
@@ -72,7 +69,7 @@ async def approval_node(state: dict, config: RunnableConfig) -> dict[str, Any]:
                 **present_tool(p["tool"], p.get("args") or {}),
             },
         )
-        rt._record(
+        rt.record(
             st,
             p["step"],
             ToolCall(p["tool_call_id"], p["tool"], p["args"]),
@@ -97,7 +94,7 @@ async def approval_node(state: dict, config: RunnableConfig) -> dict[str, Any]:
     try:
         args = spec.parse({**base_args, **(edited_args or {})})
     except ToolArgsError as e:
-        rt._record(
+        rt.record(
             st,
             p["step"],
             ToolCall(p["tool_call_id"], p["tool"], base_args),
@@ -121,11 +118,11 @@ async def approval_node(state: dict, config: RunnableConfig) -> dict[str, Any]:
         content, is_error = f"{p['tool']} has no handler", True
     else:
         try:
-            content, is_error = _fmt(handler(rt._cluster(st), args, p["tool_call_id"])), False
+            content, is_error = format_tool_output(handler(rt.cluster(st), args, p["tool_call_id"])), False
         except ToolError as e:
             content, is_error = f"Execution failed: {e}", True
 
-    if rt._tool_result_recorded(st, p["tool_call_id"]):
+    if rt.tool_result_recorded(st, p["tool_call_id"]):
         st["pending"] = None
         st["route"] = "continue"
         rt.store.save(st)
@@ -149,7 +146,7 @@ async def approval_node(state: dict, config: RunnableConfig) -> dict[str, Any]:
             "at": time.time(),
         }
     )
-    rt._emit(
+    rt.emit(
         st,
         "approval.decided",
         {
@@ -162,7 +159,7 @@ async def approval_node(state: dict, config: RunnableConfig) -> dict[str, Any]:
             **present_tool(p["tool"], final),
         },
     )
-    rt._record(
+    rt.record(
         st,
         p["step"],
         ToolCall(p["tool_call_id"], p["tool"], final),
@@ -203,8 +200,8 @@ async def input_node(state: dict, config: RunnableConfig) -> dict[str, Any]:
     text = (decision or {}).get("text") or ""
     actor = (decision or {}).get("actor", "operator")
     st["operator_log"].append({"step": p["step"], "decision": "message", "text": text, "at": time.time()})
-    rt._emit(st, "operator.message", {"text": text, "answering": p["question"], "actor": actor})
-    rt._record(
+    rt.emit(st, "operator.message", {"text": text, "answering": p["question"], "actor": actor})
+    rt.record(
         st,
         p["step"],
         ToolCall(p["tool_call_id"], "ask_operator", p["args"]),

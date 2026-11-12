@@ -1,14 +1,15 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect } from 'react'
-import { useRunStream } from '@/hooks/useRunStream'
+import { useRunStream } from './useRunStream'
 import { fetchRun } from '@/lib/api'
+import { queryKeys } from '@/lib/queryKeys'
 import { ACTIVE } from '@/lib/types'
 
 /** TanStack Query + SSE for the selected run — shared by ConsolePage. */
 export function useActiveRun(runId: string | undefined) {
   const qc = useQueryClient()
   const runQuery = useQuery({
-    queryKey: ['run', runId],
+    queryKey: queryKeys.run(runId),
     queryFn: () => fetchRun(runId!),
     enabled: Boolean(runId),
     refetchInterval: (q) => {
@@ -22,8 +23,8 @@ export function useActiveRun(runId: string | undefined) {
 
   useEffect(() => {
     if (stream.events.length) {
-      void qc.invalidateQueries({ queryKey: ['run', runId] })
-      void qc.invalidateQueries({ queryKey: ['runs'] })
+      void qc.invalidateQueries({ queryKey: queryKeys.run(runId) })
+      void qc.invalidateQueries({ queryKey: queryKeys.runs })
     }
   }, [stream.events.length, qc, runId])
 

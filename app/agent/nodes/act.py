@@ -9,14 +9,10 @@ from typing import Any
 from langchain_core.runnables import RunnableConfig
 
 from app.context import build_context
-from app.guards import LoopGuard
-from app.llm import ToolCall
+from app.domain.guards import LoopGuard
+from app.domain.lifecycle import NUDGE
+from app.domain.llm import ToolCall
 from app.tools import TOOLS, ToolArgsError, present_tool
-
-NUDGE = (
-    "You did not call a tool. Continue the investigation with a tool call, "
-    "use ask_operator if you are blocked, or call finish if you are done."
-)
 
 
 async def act_node(state: dict, config: RunnableConfig) -> dict[str, Any]:
@@ -37,11 +33,11 @@ async def act_node(state: dict, config: RunnableConfig) -> dict[str, Any]:
     messages, stats = build_context(st, rt.settings)
     st["last_context"] = stats
     if stats["dropped_groups"] > st["compacted_groups"]:
-        rt._emit(st, "context.compacted", {"dropped_groups": stats["dropped_groups"], "budget": stats["budget"]})
+        rt.emit(st, "context.compacted", {"dropped_groups": stats["dropped_groups"], "budget": stats["budget"]})
     st["compacted_groups"] = stats["dropped_groups"]
 
     t0 = time.perf_counter()
-    resp = await rt._call_llm(st, messages)
+    resp = await rt.call_llm(st, messages)
     ms = int((time.perf_counter() - t0) * 1000)
     u = st["usage"]
     cost = (resp.input_tokens * rt.settings.cost_in_per_mtok + resp.output_tokens * rt.settings.cost_out_per_mtok) / 1e6
@@ -50,7 +46,7 @@ async def act_node(state: dict, config: RunnableConfig) -> dict[str, Any]:
     u["output_tokens"] += resp.output_tokens
     u["cost_usd"] = round(u["cost_usd"] + cost, 6)
     u["llm_ms"] += ms
-    rt._emit(
+    rt.emit(
         st,
         "llm.call",
         {
@@ -81,12 +77,12 @@ async def act_node(state: dict, config: RunnableConfig) -> dict[str, Any]:
         assistant["raw"] = resp.raw
     st["history"].append(assistant)
     if resp.text:
-        rt._emit(st, "agent.message", {"text": resp.text})
+        rt.emit(st, "agent.message", {"text": resp.text})
 
     if not calls:
         st["nudges"] += 1
         if st["nudges"] > 2:
-            rt._set_status(st, "needs_attention", "The agent stopped calling tools. Send guidance and resume.")
+            rt.set_status(st, "needs_attention", "The agent stopped calling tools. Send guidance and resume.")
             st["route"] = "stop"
             rt.store.ack_inbox(acks)
             return st
@@ -100,7 +96,7 @@ async def act_node(state: dict, config: RunnableConfig) -> dict[str, Any]:
     for c in calls:
         spec = TOOLS.get(c.name)
         ui = present_tool(c.name, c.args, kind=spec.kind if spec else None)
-        rt._emit(
+        rt.emit(
             st,
             "tool.call",
             {
@@ -125,7 +121,7 @@ async def act_node(state: dict, config: RunnableConfig) -> dict[str, Any]:
         elif c.name == "finish":
             finish = c
         elif c.name == "update_working_memory":
-            results[c.id] = rt._apply_memory(st, c, spec)
+            results[c.id] = rt.apply_memory(st, c, spec)
         elif gate is not None:
             results[c.id] = (
                 "Not executed: only one production change or operator question can be pending at a time. "
@@ -134,14 +130,14 @@ async def act_node(state: dict, config: RunnableConfig) -> dict[str, Any]:
                 {},
             )
         else:
-            outcome = rt._gate(st, c, spec, step)
+            outcome = rt.gate(st, c, spec, step)
             if isinstance(outcome, tuple):
                 results[c.id] = outcome
             else:
                 gate = outcome
 
     if reads:
-        outs = await asyncio.gather(*(rt._exec_read(st, c, spec) for c, spec in reads))
+        outs = await asyncio.gather(*(rt.exec_read(st, c, spec) for c, spec in reads))
         for (c, _), out in zip(reads, outs, strict=True):
             results[c.id] = out
 
@@ -158,7 +154,7 @@ async def act_node(state: dict, config: RunnableConfig) -> dict[str, Any]:
 
     for c in calls:
         if c.id in results:
-            rt._record(st, step, c, *results[c.id])
+            rt.record(st, step, c, *results[c.id])
 
     guard = LoopGuard(rt.settings.max_identical_tool_calls)
     guard.loads(st.get("loop_guard"))
@@ -168,14 +164,14 @@ async def act_node(state: dict, config: RunnableConfig) -> dict[str, Any]:
     st["loop_guard"] = guard.dumps()
     stop, reason = guard.should_stop()
     if stop and done is None and gate is None:
-        rt._set_status(st, "needs_attention", reason)
+        rt.set_status(st, "needs_attention", reason)
         st["route"] = "stop"
         rt.store.save(st)
         rt.store.ack_inbox(acks)
         return st
 
     if done is not None:
-        rt._finish(st, done.model_dump())
+        rt.finish(st, done.model_dump())
         st["route"] = "stop"
         rt.store.ack_inbox(acks)
         return st

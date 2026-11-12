@@ -1,10 +1,9 @@
 import * as Dialog from '@radix-ui/react-dialog'
-import { useQuery } from '@tanstack/react-query'
 import { DataView, TechnicalDetails } from '@/components/common/DataView'
 import { parseMaybeJson } from '@/lib/dataDisplay'
 import { ErrorBanner } from '@/components/common/ErrorBanner'
 import { Button } from '@/components/ui/button'
-import { fetchContext } from '@/lib/api'
+import { useRunContext } from '@/features/run/hooks/queries'
 import { mapError } from '@/lib/errors'
 import { num } from '@/lib/format'
 
@@ -17,11 +16,7 @@ export function ContextInspector({
   open: boolean
   onOpenChange: (o: boolean) => void
 }) {
-  const q = useQuery({
-    queryKey: ['context', runId],
-    queryFn: () => fetchContext(runId),
-    enabled: open,
-  })
+  const q = useRunContext(runId, open)
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>

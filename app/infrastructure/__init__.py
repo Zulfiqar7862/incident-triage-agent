@@ -1,7 +1,9 @@
-"""Infrastructure adapters: persistence, cluster sim, LLM providers, checkpointer.
+"""Infrastructure adapters behind the ``app.domain.ports`` Protocols.
 
-Concrete implementations live in existing modules (`app.store`, `app.mock_env`,
-`app.llm`, `app.agent.checkpointer`) and satisfy `app.domain.ports` Protocols.
-This package documents the boundary; prefer importing the concrete modules
-directly to avoid a noisy rename of the whole tree.
+store.py         RunStorePort: SQLite runs / hash-chained events / inbox / memories
+mock_cluster.py  ClusterPort: simulated platform (scenarios + runbooks)
+runbooks.py      local runbook search used by the cluster adapter
+checkpointer.py  LangGraph checkpointer (SQLite or Postgres)
+cluster.py       cluster adapter factory
+llm_factory.py   LLM Strategy factory (providers live in app.llm)
 """

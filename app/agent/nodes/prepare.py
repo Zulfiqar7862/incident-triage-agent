@@ -16,22 +16,22 @@ async def prepare_node(state: dict, config: RunnableConfig) -> dict[str, Any]:
     st = rt.get(run_id)
     st["route"] = "continue"
 
-    ctl = rt._control.pop(run_id, None)
+    ctl = rt.take_control(run_id)
     if ctl == "cancel":
-        rt._set_status(st, "cancelled", "Cancelled by operator")
+        rt.set_status(st, "cancelled", "Cancelled by operator")
         st["route"] = "stop"
         return st
     if ctl == "pause":
-        rt._set_status(st, "paused", "Paused by operator at a step boundary")
+        rt.set_status(st, "paused", "Paused by operator at a step boundary")
         st["route"] = "stop"
         return st
     hard = bool(getattr(rt.settings, "budget_hard_stop", False))
 
     def _budget_stop(reason: str) -> dict[str, Any]:
         if hard:
-            rt._set_status(st, "cancelled", reason + " (hard budget stop).")
+            rt.set_status(st, "cancelled", reason + " (hard budget stop).")
         else:
-            rt._set_status(st, "needs_attention", reason)
+            rt.set_status(st, "needs_attention", reason)
         st["route"] = "stop"
         return st
 
@@ -53,8 +53,8 @@ async def prepare_node(state: dict, config: RunnableConfig) -> dict[str, Any]:
         )
 
     if st["status"] != "running":
-        rt._set_status(st, "running")
-    rt._maybe_budget_alert(st)
+        rt.set_status(st, "running")
+    rt.maybe_budget_alert(st)
     st["route"] = "act"
     rt.store.save(st)
     return st

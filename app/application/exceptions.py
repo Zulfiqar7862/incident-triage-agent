@@ -15,3 +15,7 @@ class InvalidInput(Exception):
 
 class TooBusy(Exception):
     pass
+
+
+class ConcurrencyConflict(Exception):
+    """Optimistic-concurrency failure reported by a store adapter (mapped to HTTP 409)."""

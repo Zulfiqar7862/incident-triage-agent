@@ -9,11 +9,11 @@ import time
 
 from app.config import Settings
 from app.context import build_context, truncate_output
+from app.infrastructure.store import Store
 from app.llm import LLMResponse, LLMTransientError, ToolCall
+from app.llm.scripted import ScriptedPolicy
 from app.main import create_app
 from app.runtime import Runtime
-from app.scripted import ScriptedPolicy
-from app.store import Store
 from fastapi.testclient import TestClient
 
 
@@ -326,8 +326,8 @@ def test_mid_approval_crash_does_not_duplicate_tool_result(tmp_path):
         args = TOOLS[p["tool"]].parse(p["args"])
         final = args.model_dump()
         p["executing"], p["final_args"] = True, final
-        content = TOOLS[p["tool"]].handler(rt._cluster(st), args, p["tool_call_id"])
-        rt._record(
+        content = TOOLS[p["tool"]].handler(rt.cluster(st), args, p["tool_call_id"])
+        rt.record(
             st,
             p["step"],
             ToolCall(p["tool_call_id"], p["tool"], final),

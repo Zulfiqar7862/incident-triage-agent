@@ -1,2 +1,2 @@
-/** Approval feature surface — card stays under components/run for stable imports. */
-export { ApprovalCard } from '@/components/run/ApprovalCard'
+/** Approval feature: the operator decision card for a pending production change. */
+export { ApprovalCard } from './ApprovalCard'

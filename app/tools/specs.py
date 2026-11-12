@@ -14,8 +14,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
-from app.runbooks import search_runbooks
-
 
 class ToolArgsError(Exception):
     pass
@@ -171,7 +169,7 @@ _SPECS = [
         "Retrieve internal runbooks matching the symptoms. Prefer this before proposing a production change when the cause looks familiar. Returns short excerpts, not the whole library.",
         "read",
         RunbookArgs,
-        lambda cl, a, cid: search_runbooks(a.query, a.top_k),
+        lambda cl, a, cid: cl.search_runbooks(a.query, a.top_k),
     ),
     ToolSpec(
         "get_recent_deploys",

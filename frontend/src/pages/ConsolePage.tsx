@@ -1,6 +1,4 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useParams, useNavigate } from 'react-router-dom'
-import { toast } from 'sonner'
+import { useNavigate, useParams } from 'react-router-dom'
 import { useState } from 'react'
 import { ErrorBanner } from '@/components/common/ErrorBanner'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
@@ -15,36 +13,19 @@ import { ThinkingIndicator } from '@/components/run/ThinkingIndicator'
 import { Timeline } from '@/components/run/Timeline'
 import { RunList } from '@/components/runs/RunList'
 import { useActiveRun } from '@/features/run/hooks/useActiveRun'
-import { createRun, fetchScenarios } from '@/lib/api'
+import { useStartRun } from '@/features/run/hooks/useStartRun'
 import { mapError } from '@/lib/errors'
 import { useUiStore } from '@/store/uiStore'
 
 export function ConsolePage() {
   const { runId } = useParams()
   const navigate = useNavigate()
-  const qc = useQueryClient()
   const thinkingPhase = useUiStore((s) => s.thinkingPhase)
   const [ctxOpen, setCtxOpen] = useState(false)
 
   const { runQuery, stream, run } = useActiveRun(runId)
 
-  const startScenario = useMutation({
-    mutationFn: async () => {
-      const scenarios = await fetchScenarios()
-      const first = scenarios[0]
-      if (!first) throw new Error('No scenarios available')
-      return createRun(first.id)
-    },
-    onSuccess: (run) => {
-      void qc.invalidateQueries({ queryKey: ['runs'] })
-      navigate(`/runs/${run.run_id}`)
-      toast.success('Scenario started')
-    },
-    onError: (e: Error) => {
-      const f = mapError(e)
-      toast.error(`${f.title} — ${f.explanation}`)
-    },
-  })
+  const startScenario = useStartRun({ successToast: 'Scenario started' })
 
   return (
     <div className="console-shell flex flex-col">
@@ -69,7 +50,7 @@ export function ConsolePage() {
             {!runId ? (
               <div className="flex min-h-0 flex-1 overflow-auto">
                 <EmptyState
-                  onStartScenario={() => startScenario.mutate()}
+                  onStartScenario={() => startScenario.mutate(undefined)}
                   busy={startScenario.isPending}
                 />
               </div>

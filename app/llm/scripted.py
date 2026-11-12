@@ -13,7 +13,7 @@ import json
 import re
 import uuid
 
-from .llm import LLMResponse, ToolCall
+from .providers import LLMResponse, ToolCall
 
 WRITE_TOOLS = {"rollback_deploy", "restart_service"}
 LOG_QUERY = "error warn timeout exception oom killed"

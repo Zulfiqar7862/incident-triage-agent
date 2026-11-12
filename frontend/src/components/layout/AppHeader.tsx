@@ -1,33 +1,25 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Activity, Moon, Sun } from 'lucide-react'
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import { createRun, fetchHealth, fetchScenarios } from '@/lib/api'
+import { useHealth, useScenarios } from '@/features/run/hooks/queries'
+import { useStartRun } from '@/features/run/hooks/useStartRun'
 import { useUiStore } from '@/store/uiStore'
 
 export function AppHeader() {
-  const navigate = useNavigate()
-  const qc = useQueryClient()
   const operator = useUiStore((s) => s.operator)
   const setOperator = useUiStore((s) => s.setOperator)
   const theme = useUiStore((s) => s.theme)
   const setTheme = useUiStore((s) => s.setTheme)
 
-  const health = useQuery({ queryKey: ['health'], queryFn: fetchHealth, retry: 1 })
-  const scenarios = useQuery({ queryKey: ['scenarios'], queryFn: fetchScenarios })
+  const health = useHealth()
+  const scenarios = useScenarios()
 
   const [scenarioId, setScenarioId] = useState('')
   const effectiveScenarioId = scenarioId || scenarios.data?.[0]?.id || ''
 
-  const start = useMutation({
-    mutationFn: (scenario_id: string) => createRun(scenario_id),
-    onSuccess: (run) => {
-      void qc.invalidateQueries({ queryKey: ['runs'] })
-      navigate(`/runs/${run.run_id}`)
-      toast.success('Triage started')
-    },
+  const start = useStartRun({
+    successToast: 'Triage started',
     onError: (e: Error) => toast.error(e.message),
   })
 
