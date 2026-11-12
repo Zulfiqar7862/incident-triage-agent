@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 
 from app.application.agent.nodes import act_node, approval_node, input_node, prepare_node
 from app.application.agent.state import AgentState
@@ -29,7 +31,7 @@ def _after_gate(state: AgentState) -> Literal["prepare", "__end__"]:
     return "prepare" if state.get("route") == "continue" else "__end__"
 
 
-def build_agent_graph(checkpointer: Any = True):
+def build_agent_graph(checkpointer: Any = True) -> CompiledStateGraph:
     """Build and compile the agent graph."""
     g: StateGraph = StateGraph(AgentState)
     # LangGraph's NodeInputT is stricter than our plain-dict AgentState TypedDict.
@@ -49,8 +51,6 @@ def build_agent_graph(checkpointer: Any = True):
     g.add_conditional_edges("input", _after_gate, {"prepare": "prepare", "__end__": END})
 
     if checkpointer is True:
-        from langgraph.checkpoint.memory import MemorySaver
-
         return g.compile(checkpointer=MemorySaver())
     if checkpointer:
         return g.compile(checkpointer=checkpointer)
