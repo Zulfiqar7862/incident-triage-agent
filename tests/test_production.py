@@ -6,11 +6,12 @@ import asyncio
 import time
 
 import pytest
-from app.config import Settings
-from app.infrastructure.store import Store
-from app.llm.scripted import ScriptedPolicy
+from app.application.exceptions import TooBusy
+from app.core.config import Settings
+from app.core.container import build_run_service
+from app.infrastructure.llm.scripted import ScriptedPolicy
+from app.infrastructure.persistence.store import Store
 from app.main import create_app
-from app.runtime import Runtime, TooBusy
 from fastapi.testclient import TestClient
 
 TOKEN = "s3cret-token-for-tests-0123"
@@ -86,13 +87,13 @@ def test_graceful_shutdown_marks_runs_interrupted(tmp_path):
     async def go():
         settings = Settings(db_path=str(tmp_path / "s.db"))
         store = Store(settings.db_path)
-        rt = Runtime(store, ScriptedPolicy(delay_s=0.3), settings)
+        rt = build_run_service(store, ScriptedPolicy(delay_s=0.3), settings)
         rid = rt.create_run("db-pool-regression")["run_id"]
         await asyncio.sleep(0.05)
         await rt.shutdown()
         st = store.load(rid)
         assert st["status"] == "interrupted" and "shut down" in st["status_reason"]
-        rt2 = Runtime(store, ScriptedPolicy(delay_s=0), settings)
+        rt2 = build_run_service(store, ScriptedPolicy(delay_s=0), settings)
         rt2.resume(rid)
         for _ in range(300):
             if store.load(rid)["status"] == "awaiting_approval":
@@ -106,7 +107,7 @@ def test_graceful_shutdown_marks_runs_interrupted(tmp_path):
 def test_runtime_rejects_runs_beyond_the_limit(tmp_path):
     async def go():
         settings = Settings(db_path=str(tmp_path / "l.db"), max_concurrent_runs=1)
-        rt = Runtime(Store(settings.db_path), ScriptedPolicy(delay_s=0.3), settings)
+        rt = build_run_service(Store(settings.db_path), ScriptedPolicy(delay_s=0.3), settings)
         rt.create_run("db-pool-regression")
         with pytest.raises(TooBusy):
             rt.create_run("upstream-oom")

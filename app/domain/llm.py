@@ -1,6 +1,6 @@
 """Provider-neutral LLM value types shared by the agent loop and every adapter.
 
-Adapters in ``app.llm`` convert these to and from each provider's wire format;
+Adapters in ``app.infrastructure.llm`` convert these to and from each provider's wire format;
 the application layer only ever sees these types.
 """
 

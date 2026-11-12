@@ -36,8 +36,8 @@ def test_live_gemini_health_and_one_run(tmp_path):
     """Spin a short live run to awaiting_approval (or completed) then cancel."""
     import time
 
-    from app.config import Settings, load_dotenv
-    from app.llm import make_llm
+    from app.core.config import Settings, load_dotenv
+    from app.infrastructure.llm import make_llm
     from app.main import create_app
     from fastapi.testclient import TestClient
 

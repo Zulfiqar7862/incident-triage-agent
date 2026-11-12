@@ -1,10 +1,11 @@
 """Outbound ports (Protocols) implemented by infrastructure adapters.
 
-The application layer (``app.application``, ``app.agent``) depends only on
-these abstractions. Concrete adapters: ``app.infrastructure.store.Store``
-(RunStorePort), ``app.infrastructure.mock_cluster.MockCluster`` (ClusterPort),
-and the providers in ``app.llm`` (LLMPort). No DI framework: adapters are
-passed to constructors by the composition roots (``app.runtime``, ``app.main``).
+The application layer depends only on these abstractions. ``RunStorePort`` is
+split into role interfaces (``RunRepository``, ``EventLog``, ``OperatorInbox``,
+``IncidentMemory``, ``StoreHealth``) so each collaborator asks only for what it uses. Concrete adapters: ``app.infrastructure.persistence.store.Store``
+(RunStorePort), ``app.infrastructure.cluster.mock_cluster.MockCluster`` (ClusterPort),
+and the providers in ``app.infrastructure.llm`` (LLMPort). No DI framework: adapters are
+passed to constructors by the composition root (``app.core.container``).
 """
 
 from __future__ import annotations
@@ -18,8 +19,15 @@ from app.domain.llm import LLMResponse
 class LLMPort(Protocol):
     """Strategy surface shared by Gemini / Anthropic / OpenAI / scripted providers."""
 
-    provider: str
-    model: str
+    @property
+    def provider(self) -> str:
+        """Provider name, e.g. ``gemini`` or ``scripted``."""
+        ...
+
+    @property
+    def model(self) -> str:
+        """Model identifier reported in events and the UI."""
+        ...
 
     async def complete(
         self,
@@ -58,8 +66,8 @@ class ClusterPort(Protocol):
 
 
 @runtime_checkable
-class RunStorePort(Protocol):
-    """Durable run checkpoints, append-only event log, operator inbox, long-term memory."""
+class RunRepository(Protocol):
+    """Durable run checkpoints with compare-and-swap saves."""
 
     def load(self, run_id: str) -> dict | None: ...
 
@@ -67,15 +75,25 @@ class RunStorePort(Protocol):
 
     def create_run(self, state: dict) -> None: ...
 
+    def list_runs(self, limit: int = 50) -> list[dict]: ...
+
+    def runs_with_status(self, statuses: list[str]) -> list[dict]: ...
+
+
+@runtime_checkable
+class EventLog(Protocol):
+    """Append-only, hash-chained audit log of run events."""
+
     def append_event(self, run_id: str, type_: str, payload: dict[str, Any]) -> dict: ...
 
     def events_since(self, run_id: str, after: int = 0, limit: int = 500) -> list[dict]: ...
 
     def verify_event_chain(self, run_id: str) -> dict[str, Any]: ...
 
-    def list_runs(self, limit: int = 50) -> list[dict]: ...
 
-    def runs_with_status(self, statuses: list[str]) -> list[dict]: ...
+@runtime_checkable
+class OperatorInbox(Protocol):
+    """Operator messages queued for the next agent step (at-least-once delivery)."""
 
     def push_inbox(self, run_id: str, text: str) -> None: ...
 
@@ -83,12 +101,27 @@ class RunStorePort(Protocol):
 
     def ack_inbox(self, ids: list[int]) -> None: ...
 
+
+@runtime_checkable
+class IncidentMemory(Protocol):
+    """Long-term memory of resolved incidents, recalled by service."""
+
     def recall(self, services: list[str], ttl_days: int, limit: int = 3) -> list[dict]: ...
 
     def add_memory(self, service: str, run_id: str, content: dict) -> None: ...
+
+
+@runtime_checkable
+class StoreHealth(Protocol):
+    """Probe and counter queries for health checks and metrics."""
 
     def ping(self) -> bool: ...
 
     def status_counts(self) -> dict[str, int]: ...
 
     def event_counts(self) -> dict[str, int]: ...
+
+
+@runtime_checkable
+class RunStorePort(RunRepository, EventLog, OperatorInbox, IncidentMemory, StoreHealth, Protocol):
+    """Everything the SQLite ``Store`` offers. Collaborators depend on the narrow roles above."""

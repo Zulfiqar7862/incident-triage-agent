@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.application.exceptions import ConcurrencyConflict, InvalidInput, NotFound, RunStateError, TooBusy
-from app.presentation.operator import error_display
+from app.presentation.views.display import error_display
 
 STATUS_BY_ERROR: dict[type[Exception], int] = {
     NotFound: 404,

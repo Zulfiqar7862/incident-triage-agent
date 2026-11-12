@@ -16,10 +16,10 @@ import time
 
 import httpx
 import pytest
-from app.config import ConfigError, Settings
-from app.infrastructure.store import Store
-from app.llm import GEMINI_DUMMY_SIGNATURE, GeminiLLM, LLMError, make_llm, to_gemini
-from app.runtime import Runtime
+from app.core.config import ConfigError, Settings
+from app.core.container import build_run_service
+from app.infrastructure.llm import GEMINI_DUMMY_SIGNATURE, GeminiLLM, LLMError, make_llm, to_gemini
+from app.infrastructure.persistence.store import Store
 
 KEY = "test-gemini-key"
 REASON = "Deploy v2.14.0 set DB_POOL_SIZE 50 -> 5; logs show pool exhaustion timeouts"
@@ -160,7 +160,7 @@ def make(tmp_path, mock: StrictGemini, db: str = "g.db"):
     settings = Settings(db_path=str(tmp_path / db), tool_backoff_s=0.01, llm_backoff_s=0.01)
     store = Store(settings.db_path)
     llm = GeminiLLM("gemini-3.5-flash", KEY, 30, transport=httpx.MockTransport(mock))
-    return settings, store, Runtime(store, llm, settings)
+    return settings, store, build_run_service(store, llm, settings)
 
 
 async def wait_for(store, rid, statuses, timeout=10.0):
@@ -210,7 +210,9 @@ def test_signatures_survive_a_server_restart(tmp_path):
         rid = rt.create_run("db-pool-regression")["run_id"]
         await wait_for(store, rid, {"awaiting_approval"})
         # New process: new runtime and HTTP client, same database. Signatures must come from the checkpoint.
-        rt2 = Runtime(store, GeminiLLM("gemini-3.5-flash", KEY, 30, transport=httpx.MockTransport(mock)), settings)
+        rt2 = build_run_service(
+            store, GeminiLLM("gemini-3.5-flash", KEY, 30, transport=httpx.MockTransport(mock)), settings
+        )
         rt2.recover()
         rt2.approve(rid)
         st = await wait_for(store, rid, {"completed", "failed"})
@@ -233,7 +235,7 @@ def test_bad_request_fails_the_run_with_a_clear_error_and_is_resumable(tmp_path)
 
 
 def test_blocked_and_malformed_responses():
-    from app.llm import from_gemini
+    from app.infrastructure.llm import from_gemini
 
     with pytest.raises(LLMError, match="SAFETY"):
         from_gemini({"promptFeedback": {"blockReason": "SAFETY"}}, "m")
@@ -313,7 +315,7 @@ def test_check_llm_script_against_strict_gemini(monkeypatch, capsys):
 def test_quota_error_switches_to_fallback_model():
     """GeminiWithFallback is a drop-in LLMPort that swaps models on quota errors only."""
     from app.domain.llm import LLMResponse, LLMTransientError
-    from app.llm.providers import GeminiWithFallback
+    from app.infrastructure.llm import GeminiWithFallback
 
     class Fake:
         def __init__(self, model, error=None):

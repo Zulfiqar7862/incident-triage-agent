@@ -7,20 +7,20 @@ import asyncio
 import contextlib
 import time
 
-from app.config import Settings
-from app.context import build_context, truncate_output
-from app.infrastructure.store import Store
-from app.llm import LLMResponse, LLMTransientError, ToolCall
-from app.llm.scripted import ScriptedPolicy
+from app.application.context import build_context, truncate_output
+from app.core.config import Settings
+from app.core.container import build_run_service
+from app.infrastructure.llm import LLMResponse, LLMTransientError, ToolCall
+from app.infrastructure.llm.scripted import ScriptedPolicy
+from app.infrastructure.persistence.store import Store
 from app.main import create_app
-from app.runtime import Runtime
 from fastapi.testclient import TestClient
 
 
 def make(tmp_path, delay: float = 0.0, **overrides):
     settings = Settings(db_path=str(tmp_path / "test.db"), tool_backoff_s=0.01, llm_backoff_s=0.01, **overrides)
     store = Store(settings.db_path)
-    return settings, store, Runtime(store, ScriptedPolicy(delay_s=delay), settings)
+    return settings, store, build_run_service(store, ScriptedPolicy(delay_s=delay), settings)
 
 
 async def wait_for(store: Store, run_id: str, statuses: set[str], timeout: float = 10.0) -> dict:
@@ -108,14 +108,15 @@ def test_run_survives_a_crash_and_resumes_from_checkpoint(tmp_path):
         rid = rt.create_run("db-pool-regression")["run_id"]
         while store.load(rid)["step"] < 2:
             await asyncio.sleep(0.01)
-        task = rt._tasks[rid]
+        task = rt.runner.task_for(rid)
+        assert task is not None
         task.cancel()  # simulate the process dying mid-step
         with contextlib.suppress(asyncio.CancelledError):
             await task
         before = store.load(rid)
         assert before["status"] == "running"
 
-        rt2 = Runtime(store, ScriptedPolicy(delay_s=0), settings)  # "new process"
+        rt2 = build_run_service(store, ScriptedPolicy(delay_s=0), settings)  # "new process"
         assert rt2.recover() == 1
         assert store.load(rid)["status"] == "interrupted"
         rt2.resume(rid)
@@ -134,7 +135,7 @@ def test_approval_survives_restart_and_is_idempotent(tmp_path):
         settings, store, rt = make(tmp_path)
         rid = rt.create_run("db-pool-regression")["run_id"]
         await wait_for(store, rid, {"awaiting_approval"})
-        rt2 = Runtime(store, ScriptedPolicy(delay_s=0), settings)
+        rt2 = build_run_service(store, ScriptedPolicy(delay_s=0), settings)
         rt2.recover()
         assert store.load(rid)["status"] == "awaiting_approval"  # a pending human decision is not lost
         rt2.approve(rid)
@@ -201,7 +202,7 @@ def test_low_confidence_write_is_bounced_back_to_the_agent(tmp_path):
                 ),
             ]
         )
-        rt = Runtime(store, llm, settings)
+        rt = build_run_service(store, llm, settings)
         rid = rt.create_run("db-pool-regression")["run_id"]
         st = await wait_for(store, rid, {"completed"})
         assert st["env"]["applied"] == {}
@@ -227,7 +228,7 @@ def test_invalid_tool_arguments_are_returned_as_errors(tmp_path):
                 LLMResponse("", [ToolCall("c3", "finish", {"summary": "s", "root_cause": "r", "resolved": False})]),
             ]
         )
-        rt = Runtime(store, llm, settings)
+        rt = build_run_service(store, llm, settings)
         rid = rt.create_run("db-pool-regression")["run_id"]
         st = await wait_for(store, rid, {"completed"})
         errs = [m["content"] for m in st["history"] if m["role"] == "tool" and m["is_error"]]
@@ -315,8 +316,12 @@ def test_mid_approval_crash_does_not_duplicate_tool_result(tmp_path):
     """Crash after recording the tool result but before clearing pending must not double-append."""
 
     async def go():
-        from app.llm import ToolCall
-        from app.tools import TOOLS
+        from app.application.events import RunEventRecorder
+        from app.application.ports import NullTelemetry
+        from app.application.tool_executor import ToolExecutor
+        from app.application.tools import TOOLS
+        from app.infrastructure.cluster.factory import cluster_for_run
+        from app.infrastructure.llm import ToolCall
 
         settings, store, rt = make(tmp_path)
         rid = rt.create_run("db-pool-regression")["run_id"]
@@ -326,8 +331,8 @@ def test_mid_approval_crash_does_not_duplicate_tool_result(tmp_path):
         args = TOOLS[p["tool"]].parse(p["args"])
         final = args.model_dump()
         p["executing"], p["final_args"] = True, final
-        content = TOOLS[p["tool"]].handler(rt.cluster(st), args, p["tool_call_id"])
-        rt.record(
+        content = TOOLS[p["tool"]].handler(cluster_for_run(st["scenario_id"], st["env"]), args, p["tool_call_id"])
+        ToolExecutor(settings, RunEventRecorder(store, store), NullTelemetry()).record(
             st,
             p["step"],
             ToolCall(p["tool_call_id"], p["tool"], final),
@@ -337,7 +342,7 @@ def test_mid_approval_crash_does_not_duplicate_tool_result(tmp_path):
         )
         store.save(st)  # pending still set — crash window
 
-        rt2 = Runtime(store, ScriptedPolicy(delay_s=0), settings)
+        rt2 = build_run_service(store, ScriptedPolicy(delay_s=0), settings)
         assert rt2.recover() == 1
         assert store.load(rid)["status"] == "interrupted"
         rt2.resume(rid)  # completes idempotent approval without a second human click

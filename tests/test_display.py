@@ -5,18 +5,13 @@ import time
 from copy import deepcopy
 
 import pytest
-from app.config import Settings
-from app.llm.scripted import ScriptedPolicy
+from app.core.config import Settings
+from app.infrastructure.llm.scripted import ScriptedPolicy
 from app.main import create_app
-from app.presentation.operator import (
-    event_display,
-    pending_display,
-    present_event,
-    present_report,
-    report_display,
-    run_display,
-    tool_result_display,
-)
+from app.presentation.views.decisions import pending_display
+from app.presentation.views.display import tool_result_display
+from app.presentation.views.events import event_display, present_event
+from app.presentation.views.report import present_report, report_display, run_display
 from fastapi.testclient import TestClient
 
 RAW = "DB_POOL_SIZE 50→5 ERROR POST /api/checkout TimeoutError rollback_deploy(service=x) Traceback"
@@ -175,11 +170,11 @@ def test_http_reload_and_sse_share_plain_views_and_preserve_audit(tmp_path, deci
         frames = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
         streamed = [frame for frame in frames if "seq" in frame]
         assert [e["operator"] for e in streamed] == [e["operator"] for e in events]
-        originals = app.state.runtime.store.events_since(rid)
+        originals = app.state.queries.events_since(rid)
         assert [e["payload"] for e in events] == [e["payload"] for e in originals]
         assert [e["event_hash"] for e in events] == [e["event_hash"] for e in originals]
         assert client.get(f"/api/runs/{rid}/events/verify").json()["ok"] is True
         if decision == "approve":
             assert any(f["value"] == "v2.13.1" for f in state["operator"]["report"]["fields"])
         else:
-            assert app.state.runtime.get(rid)["env"]["applied"] == {}
+            assert app.state.queries.get(rid)["env"]["applied"] == {}

@@ -5,14 +5,14 @@ from __future__ import annotations
 import asyncio
 import time
 
-from app.config import Settings
+from app.core.config import Settings
+from app.core.container import build_run_service
 from app.domain.guards import find_injection_markers
-from app.infrastructure.runbooks import search_runbooks
-from app.infrastructure.store import Store
-from app.llm import LLMResponse, ToolCall
-from app.llm.scripted import ScriptedPolicy
+from app.infrastructure.cluster.runbooks import search_runbooks
+from app.infrastructure.llm import LLMResponse, ToolCall
+from app.infrastructure.llm.scripted import ScriptedPolicy
+from app.infrastructure.persistence.store import Store
 from app.main import create_app
-from app.runtime import Runtime
 from fastapi.testclient import TestClient
 
 
@@ -43,7 +43,7 @@ def test_injection_in_logs_is_flagged_and_not_executed(tmp_path):
     async def go():
         settings = Settings(db_path=str(tmp_path / "t.db"), tool_backoff_s=0.01)
         store = Store(settings.db_path)
-        rt = Runtime(store, ScriptedPolicy(delay_s=0), settings)
+        rt = build_run_service(store, ScriptedPolicy(delay_s=0), settings)
         rid = rt.create_run("db-pool-regression")["run_id"]
         st = await _wait(store, rid, {"awaiting_approval"})
         types = [e["type"] for e in store.events_since(rid, 0, limit=10_000)]
@@ -78,7 +78,7 @@ def test_loop_guard_stops_identical_retries(tmp_path):
     async def go():
         settings = Settings(db_path=str(tmp_path / "t.db"), max_identical_tool_calls=3, tool_backoff_s=0.01)
         store = Store(settings.db_path)
-        rt = Runtime(store, Fake(), settings)
+        rt = build_run_service(store, Fake(), settings)
         rid = rt.create_run("db-pool-regression")["run_id"]
         st = await _wait(store, rid, {"needs_attention"})
         assert "Repeated the same tool call" in st["status_reason"]
@@ -90,7 +90,7 @@ def test_budget_alert_emitted_before_hard_stop(tmp_path):
     async def go():
         settings = Settings(db_path=str(tmp_path / "t.db"), max_steps=5, budget_alert_ratio=0.8, tool_backoff_s=0.01)
         store = Store(settings.db_path)
-        rt = Runtime(store, ScriptedPolicy(delay_s=0), settings)
+        rt = build_run_service(store, ScriptedPolicy(delay_s=0), settings)
         rid = rt.create_run("db-pool-regression")["run_id"]
         st = await _wait(store, rid, {"awaiting_approval", "needs_attention"})
         types = [e["type"] for e in store.events_since(rid, 0, limit=10_000)]
@@ -102,7 +102,7 @@ def test_budget_alert_emitted_before_hard_stop(tmp_path):
                 db_path=str(tmp_path / "t2.db"), max_steps=2, budget_alert_ratio=0.5, tool_backoff_s=0.01
             )
             store2 = Store(settings2.db_path)
-            rt2 = Runtime(store2, ScriptedPolicy(delay_s=0), settings2)
+            rt2 = build_run_service(store2, ScriptedPolicy(delay_s=0), settings2)
             rid2 = rt2.create_run("db-pool-regression")["run_id"]
             await _wait(store2, rid2, {"needs_attention"})
             types = [e["type"] for e in store2.events_since(rid2, 0, limit=10_000)]
@@ -115,7 +115,7 @@ def test_scripted_uses_runbooks_and_third_scenario(tmp_path):
     async def go():
         settings = Settings(db_path=str(tmp_path / "t.db"), tool_backoff_s=0.01)
         store = Store(settings.db_path)
-        rt = Runtime(store, ScriptedPolicy(delay_s=0), settings)
+        rt = build_run_service(store, ScriptedPolicy(delay_s=0), settings)
         rid = rt.create_run("cache-oom-injection")["run_id"]
         st = await _wait(store, rid, {"awaiting_approval"})
         assert any(a["tool"] == "search_runbooks" for a in st["actions"])
@@ -134,7 +134,7 @@ def test_gen_ai_span_events_are_emitted(tmp_path):
     async def go():
         settings = Settings(db_path=str(tmp_path / "t.db"), tool_backoff_s=0.01)
         store = Store(settings.db_path)
-        rt = Runtime(store, ScriptedPolicy(delay_s=0), settings)
+        rt = build_run_service(store, ScriptedPolicy(delay_s=0), settings)
         rid = rt.create_run("upstream-oom")["run_id"]
         await _wait(store, rid, {"awaiting_approval"})
         types = [e["type"] for e in store.events_since(rid, 0, limit=10_000)]
@@ -152,7 +152,7 @@ def test_health_lists_new_limits(tmp_path):
 
 
 def test_tool_calls_are_counted_in_prometheus(tmp_path):
-    from app.observability.metrics import TOOL_CALLS
+    from app.infrastructure.observability.metrics import TOOL_CALLS
 
     def count(tool: str) -> float:
         return TOOL_CALLS.labels(tool=tool, error="false")._value.get()
@@ -160,7 +160,7 @@ def test_tool_calls_are_counted_in_prometheus(tmp_path):
     async def go():
         settings = Settings(db_path=str(tmp_path / "t.db"), tool_backoff_s=0.01)
         store = Store(settings.db_path)
-        rt = Runtime(store, ScriptedPolicy(delay_s=0), settings)
+        rt = build_run_service(store, ScriptedPolicy(delay_s=0), settings)
         before = count("get_alert")
         rid = rt.create_run("db-pool-regression")["run_id"]
         st = await _wait(store, rid, {"awaiting_approval"})

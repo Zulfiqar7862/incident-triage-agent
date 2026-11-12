@@ -1,4 +1,4 @@
-"""FastAPI dependencies: the per-process run service, settings, and bearer auth."""
+"""FastAPI dependencies: run commands and queries, settings, telemetry, and bearer auth."""
 
 from __future__ import annotations
 
@@ -7,12 +7,22 @@ import re
 
 from fastapi import HTTPException, Request
 
-from app.config import Settings
-from app.runtime import Runtime
+from app.application.ports import TelemetryPort
+from app.application.run_queries import RunQueries
+from app.application.run_service import RunService
+from app.core.config import Settings
 
 
-def get_runtime(request: Request) -> Runtime:
-    return request.app.state.runtime
+def get_service(request: Request) -> RunService:
+    return request.app.state.service
+
+
+def get_queries(request: Request) -> RunQueries:
+    return request.app.state.queries
+
+
+def get_telemetry(request: Request) -> TelemetryPort:
+    return request.app.state.telemetry
 
 
 def get_settings(request: Request) -> Settings:

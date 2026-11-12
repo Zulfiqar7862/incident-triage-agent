@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.tools.specs import MemoryArgs
+from app.application.tools.specs import MemoryArgs
 
 
 def apply_working_memory(st: dict, args: MemoryArgs) -> list[str]:

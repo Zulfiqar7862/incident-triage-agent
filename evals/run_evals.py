@@ -31,11 +31,12 @@ import tempfile
 import time
 from pathlib import Path
 
-from app.config import Settings
-from app.infrastructure.mock_cluster import list_scenarios, load_scenario
-from app.infrastructure.store import Store
-from app.llm import make_llm
-from app.runtime import Runtime
+from app.application.run_service import RunService
+from app.core.config import Settings
+from app.core.container import build_run_service
+from app.infrastructure.cluster.mock_cluster import list_scenarios, load_scenario
+from app.infrastructure.llm import make_llm
+from app.infrastructure.persistence.store import Store
 
 DONE = {"completed", "failed", "cancelled", "needs_attention"}
 
@@ -140,7 +141,7 @@ async def judge_run(llm, scenario: dict, st: dict) -> dict:
     return out
 
 
-async def run_one(rt: Runtime, store: Store, scenario_id: str, timeout: float, llm, use_judge: bool) -> dict:
+async def run_one(rt: RunService, store: Store, scenario_id: str, timeout: float, llm, use_judge: bool) -> dict:
     t0 = time.monotonic()
     rid = rt.create_run(scenario_id)["run_id"]
     while time.monotonic() - t0 < timeout:
@@ -182,7 +183,7 @@ async def main() -> int:
     settings.db_path = os.path.join(tempfile.mkdtemp(), "eval.db")
     store = Store(settings.db_path)
     llm = make_llm(settings)
-    rt = Runtime(store, llm, settings)
+    rt = build_run_service(store, llm, settings)
 
     ids = args.scenario or [s["id"] for s in list_scenarios()]
     rows = []

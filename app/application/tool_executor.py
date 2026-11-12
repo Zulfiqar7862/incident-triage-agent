@@ -7,17 +7,15 @@ import json
 import time
 from typing import Any
 
+from app.application.context import brief_args, one_line, truncate_output
 from app.application.events import RunEventRecorder
-from app.config import Settings
-from app.context import brief_args, one_line, truncate_output
+from app.application.ports import TelemetryPort, ToolOutcome
+from app.application.tools import ToolArgsError, ToolSpec
+from app.core.config import Settings
 from app.domain.errors import ToolError, ToolTransientError
 from app.domain.guards import find_injection_markers
 from app.domain.llm import ToolCall
 from app.domain.ports import ClusterPort
-from app.observability.metrics import record_tool
-from app.tools import ToolArgsError, ToolSpec
-
-ToolOutcome = tuple[str, bool, dict[str, Any]]
 
 
 def format_tool_output(out: Any) -> str:
@@ -28,11 +26,13 @@ def format_tool_output(out: Any) -> str:
 class ToolExecutor:
     """Runs read-only tools against a ``ClusterPort`` and records every tool outcome."""
 
-    def __init__(self, settings: Settings, events: RunEventRecorder):
+    def __init__(self, settings: Settings, events: RunEventRecorder, telemetry: TelemetryPort) -> None:
         self._settings = settings
         self._events = events
+        self._telemetry = telemetry
 
     async def execute_read(self, st: dict, call: ToolCall, spec: ToolSpec, cluster: ClusterPort) -> ToolOutcome:
+        """Validate args, then run the handler off the event loop with timeout and retry."""
         try:
             args = spec.parse(call.args)
         except ToolArgsError as e:
@@ -122,7 +122,7 @@ class ToolExecutor:
             )
         st["usage"]["tool_calls"] += 1
         st["usage"]["tool_errors"] += int(is_error)
-        record_tool(call.name, is_error)
+        self._telemetry.tool_call(call.name, is_error)
         self._events.emit(
             st,
             "tool.result",

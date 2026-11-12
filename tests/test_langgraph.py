@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import asyncio
 
-from app.agent.graph import build_agent_graph, graph_mermaid
-from app.config import Settings
-from app.infrastructure.store import Store
-from app.llm.scripted import ScriptedPolicy
-from app.runtime import Runtime
+from app.application.agent.graph import build_agent_graph, graph_mermaid
+from app.core.config import Settings
+from app.core.container import build_run_service
+from app.infrastructure.llm.scripted import ScriptedPolicy
+from app.infrastructure.persistence.store import Store
 
 
 def test_graph_mermaid_mentions_gates():
@@ -27,7 +27,7 @@ def test_interrupt_resume_reject(tmp_path):
     async def go():
         settings = Settings(db_path=str(tmp_path / "lg.db"), tool_backoff_s=0.01)
         store = Store(settings.db_path)
-        rt = Runtime(store, ScriptedPolicy(delay_s=0), settings)
+        rt = build_run_service(store, ScriptedPolicy(delay_s=0), settings)
         rid = rt.create_run("db-pool-regression")["run_id"]
         for _ in range(500):
             st = store.load(rid)

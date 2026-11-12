@@ -5,15 +5,15 @@ from __future__ import annotations
 import asyncio
 import time
 
-from app.config import Settings
-from app.infrastructure.store import Store
-from app.llm import LLMResponse, ToolCall
-from app.llm.scripted import ScriptedPolicy
+from app.core.config import Settings
+from app.core.container import build_run_service
+from app.infrastructure.llm import LLMResponse, ToolCall
+from app.infrastructure.llm.scripted import ScriptedPolicy
+from app.infrastructure.persistence.store import Store
 from app.main import create_app
-from app.presentation.operator import enrich_pending
-from app.presentation.run_view import present_run
-from app.runtime import Runtime
-from app.tools.display import present_tool
+from app.presentation.views.decisions import enrich_pending
+from app.presentation.views.run_view import present_run
+from app.presentation.views.tool_labels import present_tool
 from fastapi.testclient import TestClient
 
 
@@ -52,10 +52,10 @@ def test_approval_payload_includes_risk_and_summary(tmp_path):
     async def go():
         settings = Settings(db_path=str(tmp_path / "t.db"), tool_backoff_s=0.01)
         store = Store(settings.db_path)
-        rt = Runtime(store, ScriptedPolicy(delay_s=0), settings)
+        rt = build_run_service(store, ScriptedPolicy(delay_s=0), settings)
         rid = rt.create_run("db-pool-regression")["run_id"]
         st = await _wait(store, rid, {"awaiting_approval"})
-        p = present_run(rt, st)["pending"]
+        p = present_run(rt.queries, st)["pending"]
         assert p["risk"] == "high"
         assert p.get("title") and p.get("summary")
         req = next(e for e in store.events_since(rid, 0, limit=10_000) if e["type"] == "approval.requested")
@@ -103,7 +103,7 @@ def test_unknown_service_write_is_blocked_before_approval(tmp_path):
     async def go():
         settings = Settings(db_path=str(tmp_path / "t.db"), tool_backoff_s=0.01, llm_backoff_s=0.01)
         store = Store(settings.db_path)
-        rt = Runtime(store, Fake(), settings)
+        rt = build_run_service(store, Fake(), settings)
         rid = rt.create_run("db-pool-regression")["run_id"]
         await _wait(store, rid, {"completed", "needs_attention", "failed"})
         types = [e["type"] for e in store.events_since(rid, 0, limit=10_000)]
@@ -131,7 +131,7 @@ def test_hard_budget_stop_cancels(tmp_path):
             tool_backoff_s=0.01,
         )
         store = Store(settings.db_path)
-        rt = Runtime(store, Looper(), settings)
+        rt = build_run_service(store, Looper(), settings)
         rid = rt.create_run("db-pool-regression")["run_id"]
         st = await _wait(store, rid, {"cancelled"})
         assert st["status"] == "cancelled"
@@ -146,7 +146,7 @@ def test_emergency_stop_cancels_active_runs(tmp_path):
     async def go():
         store = Store(str(tmp_path / "e.db"))
         settings = Settings(db_path=str(tmp_path / "e.db"), tool_backoff_s=0.01)
-        rt = Runtime(store, ScriptedPolicy(delay_s=0.05), settings)
+        rt = build_run_service(store, ScriptedPolicy(delay_s=0.05), settings)
         rid = rt.create_run("db-pool-regression")["run_id"]
         await asyncio.sleep(0.02)
         result = rt.emergency_stop()
@@ -189,16 +189,16 @@ def test_emergency_stop_and_verify_http(tmp_path):
 
 
 def test_public_alert_card_has_no_pcodes(tmp_path):
-    from app.agent.state import make_run_id, new_run_state
-    from app.infrastructure.mock_cluster import load_scenario
+    from app.application.agent.state import make_run_id, new_run_state
+    from app.infrastructure.cluster.mock_cluster import load_scenario
 
     settings = Settings(db_path=str(tmp_path / "a.db"), tool_backoff_s=0.01)
     store = Store(settings.db_path)
-    rt = Runtime(store, ScriptedPolicy(delay_s=0), settings)
+    rt = build_run_service(store, ScriptedPolicy(delay_s=0), settings)
     scenario = load_scenario("db-pool-regression")
     st = new_run_state(make_run_id(), scenario, settings)
     store.create_run(st)
-    pub = present_run(rt, st)
+    pub = present_run(rt.queries, st)
     assert "ALRT" not in pub["task"]
     assert "P1" not in pub["task"]
     assert pub["alert"]["severity"] == "Critical"

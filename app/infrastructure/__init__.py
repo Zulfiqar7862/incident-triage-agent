@@ -1,9 +1,8 @@
-"""Infrastructure adapters behind the ``app.domain.ports`` Protocols.
+"""Infrastructure adapters behind the domain and application ports.
 
-store.py         RunStorePort: SQLite runs / hash-chained events / inbox / memories
-mock_cluster.py  ClusterPort: simulated platform (scenarios + runbooks)
-runbooks.py      local runbook search used by the cluster adapter
-checkpointer.py  LangGraph checkpointer (SQLite or Postgres)
-cluster.py       cluster adapter factory
-llm_factory.py   LLM Strategy factory (providers live in app.llm)
+persistence/    RunStorePort: SQLite Store (runs, hash-chained events, inbox, memories),
+                LangGraph checkpointer, SQLAlchemy models + Alembic migrations
+cluster/        ClusterPort: simulated platform (scenarios + runbooks) and its factory
+llm/            LLMPort Strategies (Gemini, Anthropic, OpenAI, scripted) and the provider registry
+observability/  TelemetryPort adapter, structlog, OpenTelemetry, Prometheus, Langfuse
 """

@@ -15,10 +15,10 @@ import json
 import sys
 import time
 
-from app.config import ConfigError, Settings
-from app.context import SYSTEM_PROMPT
-from app.llm import LLMError, LLMTransientError, make_llm
-from app.tools import tool_schemas
+from app.application.context import SYSTEM_PROMPT
+from app.application.tools import tool_schemas
+from app.core.config import ConfigError, Settings
+from app.infrastructure.llm import LLMError, LLMTransientError, make_llm
 
 ALERT = {
     "id": "ALRT-0001",
