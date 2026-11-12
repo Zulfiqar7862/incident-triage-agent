@@ -1,230 +1,113 @@
-# Architecture Review Guide
+# Architecture review guide
 
-For reviewers: each claim below points to the code that implements it and to the
-automated check that proves it. Run every check locally with the commands in
-[section 6](#6-run-the-proof-yourself). Design context: [HLD](HLD.md), [LLD](LLD.md).
+A reviewer's map: where each concern lives, what a strict review found and how
+it was fixed, and which test proves each claim. Design detail is in the
+[HLD](HLD.md), [LLD](LLD.md) and [ADRs](adr/README.md).
 
-Line anchors match the current `main`; if code moves, file paths and symbol names
-are the stable reference.
-
-## 1. Project structure and responsibilities
+## 1. Where things live
 
 ```text
-app/domain/          Pure policy and contracts (ports, write gate decision, budgets, guards, lifecycle, LLM value types)
-app/application/     Use cases (RunService) and their collaborators (events, LLM gateway, tool executor, write gate)
-app/agent/           LangGraph graph and nodes; call the service only through AgentRuntimePort
-app/tools/           Tool catalog: typed argument models, JSON schemas, read / write / meta kinds
-app/context/         Prompt and context-window construction
-app/infrastructure/  Adapters: SQLite Store, MockCluster, runbooks, LangGraph checkpointer, factories
-app/llm/             LLM adapters: Gemini (+ fallback), Anthropic, OpenAI, scripted
-app/presentation/    FastAPI routes, schemas, auth, error mapping, middleware; operator projections
-app/observability/   Logging, tracing, metrics, Langfuse client
-app/config/          Settings
-app/runtime.py       Composition: RunService + default adapters
-app/main.py          HTTP composition root
-frontend/src/        features/ (run, approval) · components/ · lib/ · store/ · pages/
-tests/               pytest, including test_architecture.py
+app/domain/          Ports (Protocols), policies, value types. Standard library only.
+app/application/     Use cases: RunService, RunQueries, GraphRunner, AgentSteps,
+                     ToolCallDispatcher, WriteGate, GateResolver, LLMGateway, ToolExecutor;
+                     agent/ (LangGraph graph and nodes), tools/, context/
+app/infrastructure/  Adapters: persistence/ (Store, checkpointer, Alembic), cluster/
+                     (MockCluster), llm/ (one module per provider + registry), observability/
+app/presentation/    http/ (FastAPI app, routes, dependencies) and views/ (operator projections)
+app/core/            config.py (Settings) and container.py (composition root)
+app/main.py          Entrypoint: create_app() and app
+frontend/src/        app/ → features/{run,approval} → components, hooks, lib, stores, types
 ```
 
-### What changed in the restructuring (before → after)
+## 2. Review findings and fixes
 
-| Before | After | Why |
-| --- | --- | --- |
-| `app/runtime.py` (≈700 lines: lifecycle, drive loop, LLM retry, tool retry, recording, budgets, API view) | [`app/application/run_service.py`](../app/application/run_service.py) + [`events.py`](../app/application/events.py), [`llm_gateway.py`](../app/application/llm_gateway.py), [`tool_executor.py`](../app/application/tool_executor.py), [`working_memory.py`](../app/application/working_memory.py), [`domain/budget.py`](../app/domain/budget.py); `app/runtime.py` is a 50-line composition | Single responsibility per class; testable seams |
-| `app/main.py` (≈370 lines: wiring + all routes + auth + errors + middleware) | [`app/presentation/http/`](../app/presentation/http) (`routes.py`, `schemas.py`, `dependencies.py`, `errors.py`, `middleware.py`); `app/main.py` wires and mounts | Thin presentation; routes call one service method |
-| `app/store.py`, `app/mock_env.py`, `app/runbooks.py`, `app/agent/checkpointer.py` | `app/infrastructure/store.py`, `mock_cluster.py`, `runbooks.py`, `checkpointer.py` | Adapters live in one layer |
-| `app/guards.py`, `app/memory/working.py`, LLM value types in `app/llm/providers.py`, tool errors in `app/mock_env.py` | `app/domain/guards.py`, `memory.py`, `llm.py`, `errors.py` | Pure policy and shared types belong to the domain |
-| `app/scripted.py`, `app/logging_setup.py` | `app/llm/scripted.py`, `app/observability/logging_setup.py` | Grouped with their peers |
-| Graph nodes called private runtime methods (`rt._emit`, `rt._gate`, `rt._control.pop`, …) | Nodes call the public [`AgentRuntimePort`](../app/application/ports.py#L27) (`emit`, `gate`, `take_control`, …) | Depend on an interface, not internals |
-| `ClusterPort` had `_svc` only; `RunStorePort` covered half the Store | Ports list every method the application uses; `MockCluster.validate_service` replaces `_svc` access | Complete, honest contracts |
-| Runtime built the public run view (application → presentation dependency) | [`app/presentation/run_view.py`](../app/presentation/run_view.py) `present_run` | Dependency rule |
-| `enrich_pending` / `present_report` in `app/tools/display.py` imported presentation | Moved to [`app/presentation/operator.py`](../app/presentation/operator.py); injected into `RunService` as `present_pending` | Dependency rule |
-| `NUDGE` and tool-output formatting duplicated | One copy each (`app/domain/lifecycle.py`, `format_tool_output`) | DRY |
-| Frontend: query keys as string literals in five files; start-run mutation written twice; SSE hook and approval card outside their features | [`lib/queryKeys.ts`](../frontend/src/lib/queryKeys.ts), [`features/run/hooks/queries.ts`](../frontend/src/features/run/hooks/queries.ts), [`useStartRun.ts`](../frontend/src/features/run/hooks/useStartRun.ts), `features/run/hooks/useRunStream.ts`, `features/approval/ApprovalCard.tsx` | Feature folders; one source of truth for cache keys |
+A staff-level review of commit `bbb53aa` found 22 issues: 3 critical, 6 high,
+8 medium, 5 low.
 
-API routes, request/response shapes, event types and payloads, tool names, and
-approval semantics did not change; the full test suite and the browser E2E run
-unchanged against the new structure.
+| # | Severity | Finding | Fix |
+| --- | --- | --- | --- |
+| 1 | Critical | Eight top-level packages (`app/agent`, `app/llm`, `app/runtime.py`, ...) sat outside the layers | Every module now lives in `domain`, `application`, `infrastructure`, `presentation` or `core`; enforced by `test_every_backend_module_lives_in_a_named_layer` |
+| 2 | Critical | `RunService` was a 552-line god class | Split into [`RunService`](../app/application/run_service.py#L32), [`RunQueries`](../app/application/run_queries.py#L11), [`GraphRunner`](../app/application/graph_runner.py#L30), [`AgentSteps`](../app/application/agent_steps.py#L28) |
+| 3 | Critical | `act_node` (174 lines) chose behaviour with an if/elif chain on tool kind | [`ToolCallDispatcher`](../app/application/tool_dispatch.py#L47) handler registry; [`act_node`](../app/application/agent/nodes/act.py#L12) is now ~20 lines |
+| 4 | High | `approval_node` (163 lines) held business rules | [`GateResolver`](../app/application/gate_resolver.py#L28); the node only interrupts and delegates |
+| 5 | High | Nodes reached through the port to `rt.store` | Step port has explicit `save`, `drain_inbox`, `ack_inbox`; `test_graph_nodes_see_only_the_step_port` |
+| 6 | High | Silent `except Exception: pass` around metrics; function-local imports | Metrics go through [`TelemetryPort`](../app/application/ports.py#L57); `test_no_function_local_imports_of_app_modules` |
+| 7 | High | `providers.py` (457 lines) with an if-chain `make_llm` | One module per adapter; [`PROVIDERS`](../app/infrastructure/llm/factory.py#L61) registry |
+| 8 | High | Operator wording (`tools/display.py`) pulled into the application layer | Moved to `presentation/views/tool_labels.py` and injected as a `ToolPresenter` |
+| 9 | High | Wide `AgentRuntimePort` (14 members) | Narrow [`AgentStepsPort`](../app/application/ports.py#L94); `RunStorePort` split into five role ports |
+| 10 | Medium | `llm_factory.py` re-export shim | Deleted |
+| 11 | Medium | `create_app` mixed wiring, lifespan and static files | [`container.py`](../app/core/container.py#L171) wires; [`http/app.py`](../app/presentation/http/app.py#L66) builds FastAPI; `main.py` is the entrypoint |
+| 12 | Medium | Per-run `threading.Lock` dict inside the service | Encapsulated in [`GateLocks`](../app/application/run_controls.py#L31) with the trade-off documented |
+| 13 | Medium | Frontend shared code imported features | `app → features → shared`; Vitest boundary test |
+| 14 | Medium | Barrel files and a cross-feature import | Barrels removed; approval composed into the sidebar at the app layer |
+| 15 | Medium | Components of 239–319 lines mixing state and markup; `ToolOutputView` (319 lines) was dead code | Split into small components and `useApprovalForm`; `ToolOutputView` deleted; 200-line limit tested |
+| 16 | Medium | Docs had no requirements, estimates, alternatives or ADRs | HLD and LLD rewritten (arc42, C4); six ADRs |
+| 17 | Medium | `build_gate_or_block` free function with many parameters | [`WriteGate`](../app/application/write_gate.py#L19) with constructor-injected collaborators |
+| 18 | Low | `ScriptedPolicy.decide` is 149 lines | Accepted: deterministic test double; exempt from the size budget ([ADR-0004](adr/0004-deterministic-scripted-llm-provider.md)) |
+| 19 | Low | `event_display` if-chain | [`EVENT_VIEWS`](../app/presentation/views/events.py#L95) registry |
+| 20 | Low | Broad `except` in `readyz` / `metrics` | Kept on purpose: probes must not raise; commented |
+| 21 | Low | Missing return types on public functions | Added; mypy clean |
+| 22 | Low | No fast unit tests with fakes | [`tests/test_units.py`](../tests/test_units.py): `WriteGate`, `ToolCallDispatcher`, `NullTelemetry`, provider registry |
 
-## 2. Design patterns in the code
+Size after the refactor: no backend file over 300 lines, no function over 60,
+no class over 250 (the scripted provider is the one exemption).
 
-Only patterns that exist in the code are listed.
+## 3. Patterns and SOLID
 
-| Pattern | Where | Why |
-| --- | --- | --- |
-| Ports and adapters (hexagonal) | Ports: [`app/domain/ports.py`](../app/domain/ports.py). Adapters: [`Store`](../app/infrastructure/store.py#L62), [`MockCluster`](../app/infrastructure/mock_cluster.py#L61), [`app/llm/providers.py`](../app/llm/providers.py) | Swap storage, platform, or model without touching use cases |
-| Strategy | `LLMPort` implemented by `GeminiLLM`, `GeminiWithFallback`, `AnthropicLLM`, `OpenAILLM`, `ScriptedPolicy`; chosen by [`make_llm`](../app/llm/providers.py#L421) | Live and offline models are interchangeable at runtime |
-| Factory | [`make_llm`](../app/llm/providers.py#L421), [`cluster_for_run`](../app/infrastructure/cluster.py#L9), [`open_checkpointer`](../app/infrastructure/checkpointer.py#L14), [`new_run_state`](../app/agent/state.py) | Creation logic in one place; callers get a port |
-| Adapter | `MockCluster` adapts scenario JSON to `ClusterPort`; `to_gemini` / `to_anthropic` / `to_openai` translate the neutral message history to each wire format ([`providers.py#L89`](../app/llm/providers.py#L89)) | One internal model, many external formats |
-| Decorator | [`GeminiWithFallback`](../app/llm/providers.py#L343) wraps a `GeminiLLM` with the same interface and adds quota fallback; [`LLMGateway`](../app/application/llm_gateway.py) wraps any `LLMPort` with retries and tracing | Add behaviour without changing the wrapped class |
-| Dependency injection / composition root | [`RunService.__init__`](../app/application/run_service.py#L59) takes ports and factories; [`Runtime`](../app/runtime.py#L35) and [`create_app`](../app/main.py#L45) choose adapters; routes get the service via FastAPI `Depends(get_runtime)` ([`dependencies.py`](../app/presentation/http/dependencies.py#L14)) | No global singletons; tests pass fakes |
-| Facade | `RunService` exposes `create_run`, `approve`, `pause`, … over the graph, gateway, executor, and recorder | One entry point for presentation |
-| Observer (publish / subscribe over a log) | [`RunEventRecorder.emit`](../app/application/events.py#L24) appends to the event log; the SSE route tails it ([`routes.py#L131`](../app/presentation/http/routes.py#L131)); the browser subscribes with `EventSource` ([`useRunStream.ts`](../frontend/src/features/run/hooks/useRunStream.ts)) | Producers and the UI are decoupled; replay from `Last-Event-ID` |
-| Registry | [`TOOLS`](../app/tools/specs.py#L215) maps tool name → `ToolSpec` (schema, kind, handler); dispatch by `spec.kind` in `act_node` ([`act.py#L119`](../app/agent/nodes/act.py#L119)) | Add a tool by adding an entry |
-| State machine | Run statuses ([`lifecycle.py`](../app/domain/lifecycle.py), [LLD §5](LLD.md#5-run-lifecycle)) and the LangGraph `StateGraph` ([`graph.py`](../app/agent/graph.py)) | Explicit legal transitions; interrupts at human gates |
-| Repository with optimistic locking | `Store.save` compare-and-set on `checkpoint_version` ([`store.py#L97`](../app/infrastructure/store.py#L97)) | Detect lost updates between the drive task and operator actions |
-| Hash chain | `Store._event_hash` / `verify_event_chain` ([`store.py#L162`](../app/infrastructure/store.py#L162)) | Tamper-evident audit log |
-| Reducer (frontend) | [`streamReducer`](../frontend/src/features/run/hooks/useRunStream.ts#L22) | Pure, testable stream state transitions |
-| Custom hooks / container–presentational (frontend) | [`useActiveRun`](../frontend/src/features/run/hooks/useActiveRun.ts#L9), [`useRunActions`](../frontend/src/features/run/hooks/useRunActions.ts#L10), [`useStartRun`](../frontend/src/features/run/hooks/useStartRun.ts#L22); components receive data and callbacks | Data fetching and side effects out of components |
-| Query key factory (frontend) | [`queryKeys`](../frontend/src/lib/queryKeys.ts#L2) | Reads and invalidations cannot drift apart |
+The pattern table with links is in [LLD §13](LLD.md#13-design-patterns) and
+the SOLID mapping in [LLD §14](LLD.md#14-solid). Short version:
 
-Excerpts:
-
-```python
-# app/runtime.py — composition root chooses the adapters (DI, Factory)
-class Runtime(RunService):
-    def __init__(self, store: RunStorePort, llm: LLMPort, settings: Settings):
-        super().__init__(
-            store,
-            llm,
-            settings,
-            cluster_factory=cluster_for_run,
-            checkpointer_factory=open_checkpointer,
-            scenario_loader=load_scenario,
-            present_pending=enrich_pending,
-            scenario_catalog=list_scenarios,
-        )
-```
-
-```python
-# app/infrastructure/cluster.py — Factory returning the port, not the class
-def cluster_for_run(scenario_id: str, env: dict) -> ClusterPort:
-    return MockCluster(load_scenario(scenario_id), env)
-```
-
-```python
-# app/application/events.py — the single event publisher (Observer source)
-def emit(self, st: dict, type_: str, payload: dict) -> None:
-    payload = {"step": st["step"], **payload}
-    self._store.append_event(st["run_id"], type_, payload)
-```
-
-## 3. SOLID, one example each
-
-**Single responsibility.** Each application class has one reason to change.
-`RunEventRecorder` only records events and status;
-`ToolExecutor` only runs and records tools; HTTP handlers only translate HTTP.
-
-```python
-# app/presentation/http/routes.py#L89 — a route: validate, call one use case, present
-@api.post("/runs", status_code=201)
-async def create_run(body: CreateRun, actor: str = Depends(require_auth), runtime: Runtime = Depends(get_runtime)):
-    st = runtime.create_run(body.scenario_id)
-    log.info(json.dumps({"event": "api.run_created", "run": st["run_id"], "actor": actor}))
-    return present_run(runtime, st)
-```
-
-**Open/closed.** `RunService` is closed for modification but open to new
-platforms: a live Kubernetes adapter is a new `ClusterPort` implementation passed
-as `cluster_factory`; nothing in the service changes. Error mapping is a table,
-so a new application error is one entry:
-
-```python
-# app/presentation/http/errors.py#L11
-STATUS_BY_ERROR: dict[type[Exception], int] = {
-    NotFound: 404,
-    RunStateError: 409,
-    InvalidInput: 422,
-    TooBusy: 429,
-    ConcurrencyConflict: 409,
-}
-```
-
-**Liskov substitution.** Any `LLMPort` works where another is expected.
-`GeminiWithFallback` stands in for `GeminiLLM`; tests run the whole agent with
-`ScriptedPolicy` or a `FakeLLM` in place of a live provider.
-
-```python
-# app/llm/providers.py#L343
-class GeminiWithFallback:
-    """Primary Gemini model with automatic fallback on 429/quota exhaustion."""
-    provider = "gemini"
-    def __init__(self, primary: GeminiLLM, fallback: GeminiLLM | None): ...
-```
-
-Verified by `test_adapters_implement_domain_ports` and
-`test_quota_error_switches_to_fallback_model`.
-
-**Interface segregation.** Clients see only what they need. Graph nodes use
-`AgentRuntimePort`; the run view needs two methods, so it declares its own
-two-method protocol instead of depending on `RunService`:
-
-```python
-# app/presentation/run_view.py#L11
-class RunViewSource(Protocol):
-    def is_active(self, run_id: str) -> bool: ...
-    def scenario_alert(self, scenario_id: str) -> dict | None: ...
-```
-
-**Dependency inversion.** The use-case layer depends on abstractions; concrete
-adapters are supplied from outside.
-
-```python
-# app/application/run_service.py#L59
-def __init__(
-    self,
-    store: RunStorePort,
-    llm: LLMPort,
-    settings: Settings,
-    *,
-    cluster_factory: ClusterFactory,
-    checkpointer_factory: CheckpointerFactory,
-    scenario_loader: ScenarioLoader,
-    present_pending: PendingPresenter = dict,
-    scenario_catalog: ScenarioCatalog = list,
-): ...
-```
-
-`test_application_layer_depends_on_ports_not_adapters` fails the build if
-`app/application`, `app/agent`, `app/tools`, or `app/context` import an adapter.
+| Principle | Concrete change |
+| --- | --- |
+| S | `RunService` split four ways; `LLMGateway` owns retries and accounting; `GateResolver` owns decisions |
+| O | Registries for tool handlers, providers, event views and prompt sections |
+| L | Every LLM adapter, `GeminiWithFallback`, `NullTelemetry` and test fakes are used only through Protocols |
+| I | `RunStorePort` = five role ports; nodes see only `AgentStepsPort` |
+| D | Application classes take ports in constructors; only `core/container.py` names concrete classes |
 
 ## 4. Claim → code → proof
 
 | Claim | Code | Verified by |
 | --- | --- | --- |
-| Domain is framework-free | `app/domain/` | `tests/test_architecture.py::test_domain_is_pure_python` |
-| Use cases depend on ports, not adapters | `app/application/`, `app/agent/`, `app/tools/`, `app/context/` | `test_application_layer_depends_on_ports_not_adapters` |
-| Adapters do not depend on the web layer | `app/infrastructure/`, `app/llm/` | `test_infrastructure_does_not_depend_on_presentation` |
-| Routes reach storage only through the service | `app/presentation/` | `test_presentation_uses_application_not_adapters` |
-| `main.py` is only a composition root | `app/main.py` | `test_routes_are_not_defined_in_the_composition_root` |
-| Every adapter satisfies its port | `Store`, `MockCluster`, all LLM providers | `test_adapters_implement_domain_ports`, `test_runtime_satisfies_agent_runtime_port` |
-| Gemini fallback only on quota errors | `GeminiWithFallback` | `tests/test_gemini.py::test_quota_error_switches_to_fallback_model` |
-| No production change without approval | `write_gate.py`, `approval_node` | `test_bad_deploy_is_rolled_back_after_approval`, `test_rejection_is_fed_back_and_nothing_is_executed`, `test_interrupt_resume_reject` |
+| Domain is framework-free | `app/domain/` | `test_domain_is_pure_python` |
+| Use cases depend on ports, not adapters | `app/application/` | `test_application_depends_on_ports_not_adapters` |
+| Adapters do not depend on the web layer | `app/infrastructure/` | `test_infrastructure_does_not_depend_on_presentation_or_core_wiring` |
+| Routes reach storage only through the application | `app/presentation/` | `test_presentation_uses_application_not_adapters` |
+| Every adapter satisfies its port | `Store`, `MockCluster`, LLM adapters, telemetry | `test_adapters_implement_ports`, `test_agent_steps_satisfies_the_step_port` |
+| Every tool and provider is registered | `ToolCallDispatcher`, `PROVIDERS` | `test_every_tool_has_a_dispatch_handler`, `test_provider_registry_covers_every_configurable_provider` |
+| Gemini falls back only on quota errors | `GeminiWithFallback` | `test_quota_error_switches_to_fallback_model` |
+| No production change without approval | `WriteGate`, `approval_node`, `GateResolver` | `test_bad_deploy_is_rolled_back_after_approval`, `test_rejection_is_fed_back_and_nothing_is_executed`, `test_interrupt_resume_reject` |
 | Operator can edit before approving | `RunService.approve` | `test_operator_can_edit_arguments_before_approving` |
-| Low-confidence writes never reach a human | `evaluate_write_confidence` | `test_low_confidence_write_is_bounced_back_to_the_agent` |
-| Unknown services are blocked | `build_gate_or_block` | `test_unknown_service_write_is_blocked_before_approval` |
-| Durable resume after crash, including mid-approval | `RunService.recover`, `resume`, idempotent writes | `test_run_survives_a_crash_and_resumes_from_checkpoint`, `test_approval_survives_restart_and_is_idempotent`, `test_mid_approval_crash_does_not_duplicate_tool_result`, `test_graceful_shutdown_marks_runs_interrupted` |
-| Pause / resume / emergency stop | `RunService` | `test_pause_and_resume`, `test_emergency_stop_cancels_active_runs`, `test_emergency_stop_and_verify_http` |
-| Budgets and loop guard stop runaway runs | `prepare_node`, `LoopGuard` | `test_step_budget_stops_runaway_loops`, `test_hard_budget_stop_cancels`, `test_budget_alert_emitted_before_hard_stop`, `test_loop_guard_stops_identical_retries` |
+| Low-confidence writes never reach a human | `evaluate_write_confidence`, `WriteGate` | `test_low_confidence_write_is_bounced_back_to_the_agent`, `test_write_gate_bounces_low_confidence_without_paging_a_human` |
+| Unknown services are blocked | `WriteGate` | `test_unknown_service_write_is_blocked_before_approval`, `test_write_gate_blocks_unknown_services` |
+| Durable resume after a crash, including mid-approval | `RunService.recover`, `resume`, idempotent writes | `test_run_survives_a_crash_and_resumes_from_checkpoint`, `test_approval_survives_restart_and_is_idempotent`, `test_mid_approval_crash_does_not_duplicate_tool_result`, `test_graceful_shutdown_marks_runs_interrupted` |
+| Pause, resume, emergency stop | `RunService` | `test_pause_and_resume`, `test_emergency_stop_cancels_active_runs`, `test_emergency_stop_and_verify_http` |
+| Budgets and loop guard stop runaway runs | `exhausted_budget`, `LoopGuard` | `test_step_budget_stops_runaway_loops`, `test_hard_budget_stop_cancels`, `test_budget_alert_emitted_before_hard_stop`, `test_loop_guard_stops_identical_retries` |
 | Audit log is hash-chained and detects edits | `Store.append_event`, `verify_event_chain` | `test_event_hash_chain_verifies_and_detects_tamper` |
-| Prompt injection in tool output is flagged, not followed | `ToolExecutor.record` | `test_injection_in_logs_is_flagged_and_not_executed`, eval scenario `cache-oom-injection` |
-| Every tool result is counted in Prometheus (`agent_tool_calls_total`) | `ToolExecutor.record` | `tests/test_hardening.py::test_tool_calls_are_counted_in_prometheus` |
-| Operator view never shows raw code or logs | `app/presentation/operator.py` | `tests/test_display.py` (6 tests), `scripts/e2e_ui.py` |
+| Prompt injection in tool output is flagged, not followed | `ToolExecutor.record` | `test_injection_in_logs_is_flagged_and_not_executed`, eval `cache-oom-injection` |
+| Every tool result is counted in Prometheus | `ToolExecutor` → `TelemetryPort.tool_call` | `test_tool_calls_are_counted_in_prometheus` |
+| Operator view never shows raw code or logs | `app/presentation/views/` | `tests/test_display.py` (6 tests), `scripts/e2e_ui.py` |
 | API auth, headers, limits, 429 | `app/presentation/http/` | `tests/test_production.py` |
-| Agent resolves the scenarios correctly | whole system | `python -m evals.run_evals --provider scripted` (3/3) |
+| Agent resolves the scenarios | whole system | `python -m evals.run_evals --provider scripted` (3/3) |
 | UI works end to end in a browser | frontend + API | `python -m scripts.e2e_ui` |
 
-## 5. Known gaps (honest list)
+## 5. Known gaps
 
-- The platform is simulated (`MockCluster`); no live cluster adapter exists yet.
+- The platform is simulated (`MockCluster`); no live cluster adapter exists.
 - The Store is SQLite only; `DATABASE_URL` moves only the LangGraph checkpointer to Postgres.
-- One process, one worker; no distributed run leases.
-- Plain-language tool labels (`present_tool`, [`app/tools/display.py`](../app/tools/display.py))
-  live in the tool catalog, next to the tool definitions, because graph nodes
-  attach them to `tool.call` events. The module imports only the domain, so the
-  layer rules hold; it is a placement choice, not a boundary violation.
-- The Langfuse client is configured but generations are not sent yet (OpenTelemetry
-  spans and Prometheus metrics are the active telemetry).
+- One process, one worker; no distributed run leases ([ADR-0005](adr/0005-single-worker-process-model.md)).
+- The Langfuse client is configured but generations are not sent yet.
 - Emergency stop is available through the API, not as a console button.
+- Operator identity (`X-Operator`) is self-declared.
 
 ## 6. Run the proof yourself
 
 ```bash
-.venv/bin/pytest -q tests/test_architecture.py        # layer boundaries + port conformance
-TOOL_BACKOFF_S=0.01 .venv/bin/pytest -q -m 'not live'  # full backend suite
-.venv/bin/ruff check app tests evals scripts && .venv/bin/mypy -p app
+.venv/bin/pytest -q tests/test_architecture.py tests/test_units.py
+TOOL_BACKOFF_S=0.01 .venv/bin/pytest -q -m 'not live'
+.venv/bin/ruff check app tests evals scripts && .venv/bin/ruff format --check app tests evals scripts && .venv/bin/mypy app
 TOOL_BACKOFF_S=0.01 .venv/bin/python -m evals.run_evals --provider scripted
-(cd frontend && npm run lint && npm run typecheck && npm test && npm run build)
+(cd frontend && npm run lint && npm run format:check && npm run typecheck && npm test && npm run build)
 TOOL_BACKOFF_S=0.01 SCRIPTED_DELAY_S=0.12 .venv/bin/python -m scripts.e2e_ui
 ```
 

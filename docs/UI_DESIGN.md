@@ -47,7 +47,7 @@ an existing operator workspace, not a marketing page.
   plan/evidence stays available through disclosure rather than crowding actions.
 - The default view now shows a concise checked-evidence list, not model thoughts,
   inferred plan progress, repeated approval notices, raw queries, or checkpoints.
-- `app/presentation/operator.py` builds typed summaries from tool identities,
+- `app/presentation/views/` builds typed summaries from tool identities,
   numeric measurements, release records, and actual applied-action records. Unknown
   or free-form data gets an explicit fallback, not heuristic text sanitization.
 - HTTP snapshots, reload event history, and SSE share the same projection.

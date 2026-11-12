@@ -58,7 +58,7 @@ before exposing the API elsewhere. Operator identity is self-declared, not IAM.
 .venv/bin/mypy -p app
 TOOL_BACKOFF_S=0.01 .venv/bin/pytest -q -m 'not live'
 TOOL_BACKOFF_S=0.01 .venv/bin/python -m evals.run_evals --provider scripted
-(cd frontend && npm run lint && npm run typecheck && npm test && npm run build)
+(cd frontend && npm run lint && npm run format:check && npm run typecheck && npm test && npm run build)
 .venv/bin/python -m playwright install chromium
 TOOL_BACKOFF_S=0.01 SCRIPTED_DELAY_S=0.12 .venv/bin/python -m scripts.e2e_ui
 .venv/bin/python -m scripts.capture_screenshots
@@ -70,15 +70,16 @@ The automated browser suites use temporary databases and local ports 8878/8877;
 stop any process occupying those ports first. Rebuild the frontend before E2E
 when changing its source. Capture output is under `docs/screenshots/`.
 
-`cd frontend && npm run format:check` is a separate known formatting gate: untouched
-baseline files still fail it. See `LOCAL_RELEASE.md` for exact verification scope
-and remaining warnings. Live-model tests and Docker were not part of this local
+`npm run format:check` (Prettier) passes and runs in CI. See `LOCAL_RELEASE.md`
+for the earlier release's verification scope. Live-model tests and Docker were not part of this local
 release validation. The AI assistance document is a summary, not a full transcript.
 
 ## Project-local Claude skills
 
 `.claude/skills/frontend-design` and `.claude/skills/webapp-testing` contain pinned
-Apache-2.0 guidance, licenses and reviewed scripts. Claude Code can discover them
+Apache-2.0 guidance, licenses and reviewed scripts. `.claude/skills/architecture-patterns`
+and `.claude/skills/architecture-decision-records` are pinned MIT Markdown skills
+used for the layer layout and the ADRs. Claude Code can discover them
 when opened in this project. See `.claude/skills/PROVENANCE.md`; these do not change
 app runtime behavior or require a plugin installation. UI/UX Pro Max was consulted
 separately rather than silently installing an entire unrelated toolchain.

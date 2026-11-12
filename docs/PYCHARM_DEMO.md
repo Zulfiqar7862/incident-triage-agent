@@ -49,7 +49,7 @@ cd ..
 | --- | --- | --- |
 | **Backend (uvicorn)** | `python -m uvicorn app.main:app --host 127.0.0.1 --port 8000` in `$PROJECT_DIR$` with `LLM_PROVIDER=scripted`, `REQUIRE_LLM=false` | The full app at <http://127.0.0.1:8000> (API + built UI) |
 | **Tests (pytest)** | `pytest tests -q --ignore=tests/test_e2e_live.py` with the scripted model | The whole offline backend suite, in the PyCharm test runner |
-| **Architecture tests** | `pytest tests/test_architecture.py -q` | Layer boundaries and port conformance |
+| **Architecture tests** | `pytest tests/test_architecture.py -q` | Layer rules, size budgets, port conformance, registries |
 | **Frontend dev (npm)** | `npm run dev` in `frontend/` | Hot-reload UI at <http://127.0.0.1:5173> (proxies `/api` to `:8000`) |
 | **Full app** (compound) | Backend + Frontend dev together | Development with hot reload |
 
@@ -71,14 +71,14 @@ Configuration notes:
 | Time | Click / show | Say |
 | --- | --- | --- |
 | 0:00 | README in PyCharm's Markdown preview; the links at the top | "This is a governed incident-triage agent: it investigates alerts with tools, stops for human approval before any change, and survives restarts. The platform it operates on is simulated." |
-| 0:45 | [HLD](HLD.md) section 2–3 diagrams | "FastAPI and a React console in front, a LangGraph state machine inside, SQLite for the run store and checkpoints, a pluggable LLM." |
+| 0:45 | [HLD](HLD.md) sections 2, 4, 5 (requirements, C4 context and containers) | "FastAPI and a React console in front, a LangGraph state machine inside, SQLite for the run store and checkpoints, a pluggable LLM." |
 | 1:30 | Run **Backend (uvicorn)**; open <http://127.0.0.1:8000> | "Offline scripted model, so the demo is deterministic." |
 | 2:00 | Enter a name, pick **Checkout errors after a deploy**, click **Start triage** | "Progress streams over Server-Sent Events. Each tool call is shown as a plain sentence, not raw JSON." |
 | 2:45 | Approval card: click **Edit before approving**, change the reason, click **Approve fix** | "Writes never run without approval. Low-confidence or unknown-service proposals are blocked before they reach me." |
 | 3:30 | Final report; then start a second run and use **Pause** / **Resume** / **Stop** | "Pause takes effect at the next step boundary; Stop cancels the in-flight task." |
 | 4:00 | PyCharm terminal: `curl -s http://127.0.0.1:8000/api/runs \| head -c 400` then `curl -s http://127.0.0.1:8000/api/runs/<run_id>/events/verify` | "Every event is SHA-256 hash-chained per run; this endpoint re-computes the chain." |
-| 4:30 | [LLD](LLD.md) sections 2, 4, 5 (layers, graph, lifecycle) | "Domain is pure Python, application depends on ports, adapters are injected at the composition root." |
-| 5:00 | [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md) sections 2–3; Ctrl/Cmd-click a link such as `app/application/run_service.py#L59` | "Each pattern and SOLID principle points to real code and a test." |
+| 4:30 | [LLD](LLD.md) sections 2, 3, 5, 6 (layers, components, graph, lifecycle) and one [ADR](adr/README.md) | "Domain is pure Python, application depends on ports, adapters are injected at the composition root in `app/core/container.py`." |
+| 5:00 | [LLD §13–14](LLD.md#13-design-patterns) and [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md) section 2; Ctrl/Cmd-click a code link such as `ToolCallDispatcher` | "Each pattern and SOLID principle points to real code and a test; the review lists what was found and how it was fixed." |
 | 5:45 | Run **Architecture tests**, then **Tests (pytest)** | "The import rules are tests, so a forbidden dependency fails CI." |
 | 6:30 | `tests/test_architecture.py` and `.github/workflows/ci.yml` | "CI runs lint, types, architecture, unit, evals, the frontend suite, a browser E2E, and a Docker build." |
 

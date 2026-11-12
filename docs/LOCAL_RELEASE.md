@@ -1,5 +1,7 @@
 # Source release notes
 
+> Historical record. File paths here predate the layered restructure of 2026-11-12; see the [LLD](LLD.md#1-project-structure) for the current layout.
+
 Baseline: `2096a05` on `main`, two existing commits ahead of `origin/main`.
 The original ZIP snapshot included the complete tracked/untracked working-tree
 refactor, assignment alignment, UI changes and project-local skills before

@@ -1,5 +1,7 @@
 # AI assistance transcript
 
+> Historical record. File paths here predate the layered restructure of 2026-11-12; see the [LLD](LLD.md#1-project-structure) for the current layout.
+
 **Disclosure:** this file is a curated implementation summary, not a complete or
 verbatim AI conversation transcript. It does not prove that every change received
 human review. Full conversation history is not included in this source release;
