@@ -1,9 +1,10 @@
 import * as Dialog from '@radix-ui/react-dialog'
-import { DataView, TechnicalDetails } from '@/components/common/DataView'
+import { DataView } from '@/components/common/DataView'
+import { TechnicalDetails } from '@/components/common/TechnicalDetails'
 import { parseMaybeJson } from '@/lib/dataDisplay'
 import { ErrorBanner } from '@/components/common/ErrorBanner'
 import { Button } from '@/components/ui/button'
-import { useRunContext } from '@/features/run/hooks/queries'
+import { useRunContext } from '@/features/run/api/queries'
 import { mapError } from '@/lib/errors'
 import { num } from '@/lib/format'
 

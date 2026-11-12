@@ -1,5 +1,5 @@
 import { Brain } from 'lucide-react'
-import { type RunStatus } from '@/lib/types'
+import { type RunStatus } from '@/types/api'
 import { cn } from '@/lib/utils'
 
 export function ThinkingIndicator({

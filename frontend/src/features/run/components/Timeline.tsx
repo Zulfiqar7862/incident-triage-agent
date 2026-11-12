@@ -2,7 +2,7 @@ import { ArrowDown } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { ToolCard, type ToolCardModel } from './ToolCard'
-import type { AgentEvent, RunStatus } from '@/lib/types'
+import type { AgentEvent, RunStatus } from '@/types/api'
 
 function buildTools(events: AgentEvent[], status?: RunStatus) {
   const tools = new Map<string, ToolCardModel>()

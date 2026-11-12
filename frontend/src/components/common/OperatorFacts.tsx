@@ -1,4 +1,4 @@
-import type { OperatorDisplay } from '@/lib/types'
+import type { OperatorDisplay } from '@/types/api'
 
 /** Only API-owned scalar facts and evidence belong in readable operator cards. */
 export function OperatorFacts({

@@ -1,4 +1,4 @@
-import type { RunStatus } from '@/lib/types'
+import type { RunStatus } from '@/types/api'
 
 /** Plans contain intent, not per-item completion. Never infer completed actions from model-step counts. */
 export function StepProgress({

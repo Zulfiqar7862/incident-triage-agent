@@ -5,7 +5,7 @@ import { mapError } from '@/lib/errors'
 
 /**
  * Operator control actions for a single run (approve / reject / pause / …).
- * Keeps SidePanel presentational: mutations + toast error mapping live here.
+ * Keeps the side panel presentational: mutations and toast error mapping live here.
  */
 export function useRunActions(runId: string, onSettled?: () => void) {
   const [busy, setBusy] = useState(false)
@@ -49,3 +49,5 @@ export function useRunActions(runId: string, onSettled?: () => void) {
     message: (text: string) => act(() => messageRun(runId, text)),
   }
 }
+
+export type RunActions = ReturnType<typeof useRunActions>

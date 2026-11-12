@@ -1,14 +1,14 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, expect, it, vi } from 'vitest'
+import type { RunActions } from '../api/useRunActions'
 import { SidePanel } from './SidePanel'
 import { ThinkingIndicator } from './ThinkingIndicator'
 import { ErrorBanner } from '@/components/common/ErrorBanner'
 import { ApiError } from '@/lib/api'
 import { mapError } from '@/lib/errors'
-import type { RunDetail } from '@/lib/types'
-import { useUiStore } from '@/store/uiStore'
+import type { RunDetail } from '@/types/api'
+import { useUiStore } from '@/stores/uiStore'
 
-vi.mock('@/features/run/hooks/useRunActions', () => ({ useRunActions: () => ({ busy: false }) }))
 const raw = 'DB_POOL_SIZE ERROR POST /api/checkout TimeoutError Traceback rollback_deploy()'
 const run: RunDetail = {
   run_id: 'run',
@@ -55,7 +55,7 @@ beforeEach(() => useUiStore.setState({ showEngineerDetails: false }))
 
 it('shows only structured report facts; original reasoning is in the separate explicit engineering disclosure', () => {
   const { container } = render(
-    <SidePanel run={run} onRefresh={vi.fn()} onInspectContext={vi.fn()} />,
+    <SidePanel run={run} actions={{ busy: false } as RunActions} onInspectContext={vi.fn()} />,
   )
   expect(container.textContent).not.toContain('DB_POOL_SIZE')
   expect(container.textContent).not.toContain('TimeoutError')

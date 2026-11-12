@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef } from 'react'
 import { streamUrl } from '@/lib/api'
-import type { AgentEvent } from '@/lib/types'
-import { useUiStore } from '@/store/uiStore'
+import type { AgentEvent } from '@/types/api'
+import { useUiStore } from '@/stores/uiStore'
 
 export type StreamState = {
   events: AgentEvent[]

@@ -1,5 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
-import { ErrorBanner } from '@/components/common/ErrorBanner'
+import { ErrorBanner } from './ErrorBanner'
 import { mapError } from '@/lib/errors'
 
 type Props = { children: ReactNode; fallbackTitle?: string }

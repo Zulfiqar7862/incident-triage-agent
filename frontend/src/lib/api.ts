@@ -1,4 +1,4 @@
-import type { HealthInfo, OperatorDisplay, RunDetail, RunSummary, Scenario } from './types'
+import type { HealthInfo, OperatorDisplay, RunDetail, RunSummary, Scenario } from '@/types/api'
 
 const TOKEN_KEY = 'apiToken'
 const OPERATOR_KEY = 'operator'

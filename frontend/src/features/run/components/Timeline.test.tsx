@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { Timeline } from './Timeline'
-import type { AgentEvent, OperatorDisplay } from '@/lib/types'
+import type { AgentEvent, OperatorDisplay } from '@/types/api'
 
 const raw = 'DB_POOL_SIZE 50→5 ERROR POST /api/checkout TimeoutError Traceback rollback_deploy()'
 const display = (title: string, summary = ''): OperatorDisplay => ({

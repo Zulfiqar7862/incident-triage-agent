@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { TERMINAL, type RunStatus } from '@/lib/types'
+import { TERMINAL, type RunStatus } from '@/types/api'
 
 export function useElapsed(createdAt: number | undefined, status: RunStatus | undefined) {
   const [now, setNow] = useState(() => Date.now() / 1000)

@@ -3,7 +3,7 @@ import { useEffect } from 'react'
 import { useRunStream } from './useRunStream'
 import { fetchRun } from '@/lib/api'
 import { queryKeys } from '@/lib/queryKeys'
-import { ACTIVE } from '@/lib/types'
+import { ACTIVE } from '@/types/api'
 
 /** TanStack Query + SSE for the selected run — shared by ConsolePage. */
 export function useActiveRun(runId: string | undefined) {

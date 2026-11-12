@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { ApiError } from '@/lib/api'
-import { humanizeKey, mapError } from '@/lib/errors'
+import { ApiError } from './api'
+import { humanizeKey, mapError } from './errors'
 
 describe('mapError', () => {
   it('maps network failures', () => {

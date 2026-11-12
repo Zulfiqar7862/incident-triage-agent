@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { HashRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { Toaster } from 'sonner'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
-import { ConsolePage } from '@/pages/ConsolePage'
+import { ConsolePage } from '@/app/routes/ConsolePage'
 
 const qc = new QueryClient({
   defaultOptions: {

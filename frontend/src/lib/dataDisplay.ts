@@ -1,4 +1,4 @@
-import { formatElapsed, money, num } from '@/lib/format'
+import { formatElapsed, money, num } from './format'
 
 export function formatScalar(value: unknown, keyHint?: string): string {
   if (value == null) return '—'

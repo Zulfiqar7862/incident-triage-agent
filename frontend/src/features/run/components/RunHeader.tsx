@@ -2,7 +2,7 @@ import { Clock } from 'lucide-react'
 import { StatusBadge } from '@/components/ui/badge'
 import { useElapsed } from '@/hooks/useElapsed'
 import { relativeTime } from '@/lib/format'
-import type { RunDetail } from '@/lib/types'
+import type { RunDetail } from '@/types/api'
 
 export function RunHeader({ run }: { run: RunDetail }) {
   const elapsed = useElapsed(run.created_at, run.status)

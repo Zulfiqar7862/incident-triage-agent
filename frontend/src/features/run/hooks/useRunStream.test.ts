@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { streamReducer, type StreamState } from './useRunStream'
-import type { AgentEvent } from '@/lib/types'
+import type { AgentEvent } from '@/types/api'
 
 const base: StreamState = {
   events: [],

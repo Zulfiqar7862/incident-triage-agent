@@ -73,7 +73,7 @@ export interface PendingApproval {
   step: number
   requested_at?: number
   executing?: boolean
-  /** Backend display helpers (app/tools/display.py) */
+  /** Backend display helpers (app/presentation/views/tool_labels.py) */
   title?: string
   summary?: string
   risk?: 'high' | 'low' | string

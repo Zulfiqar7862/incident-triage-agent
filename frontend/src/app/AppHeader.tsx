@@ -2,9 +2,9 @@ import { Activity, Moon, Sun } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import { useHealth, useScenarios } from '@/features/run/hooks/queries'
-import { useStartRun } from '@/features/run/hooks/useStartRun'
-import { useUiStore } from '@/store/uiStore'
+import { useHealth, useScenarios } from '@/features/run/api/queries'
+import { useStartRun } from '@/features/run/api/useStartRun'
+import { useUiStore } from '@/stores/uiStore'
 
 export function AppHeader() {
   const operator = useUiStore((s) => s.operator)

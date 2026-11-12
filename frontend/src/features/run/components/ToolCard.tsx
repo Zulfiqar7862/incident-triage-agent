@@ -1,7 +1,7 @@
 import { Check, ChevronDown, Loader2, XCircle } from 'lucide-react'
 import { useState } from 'react'
-import { OperatorFacts } from './OperatorFacts'
-import type { OperatorDisplay } from '@/lib/types'
+import { OperatorFacts } from '@/components/common/OperatorFacts'
+import type { OperatorDisplay } from '@/types/api'
 import { cn } from '@/lib/utils'
 
 export type ToolCardModel = {

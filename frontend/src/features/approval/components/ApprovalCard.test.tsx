@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { ApprovalCard } from './ApprovalCard'
-import type { PendingApproval } from '@/lib/types'
+import type { PendingApproval } from '@/types/api'
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(), message: vi.fn() },

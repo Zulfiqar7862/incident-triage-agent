@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils'
-import type { RunStatus } from '@/lib/types'
+import type { RunStatus } from '@/types/api'
 
 const tone: Record<string, string> = {
   running: 'text-[var(--color-accent)]',

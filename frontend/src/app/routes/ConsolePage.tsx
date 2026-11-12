@@ -3,19 +3,19 @@ import { useState } from 'react'
 import { ErrorBanner } from '@/components/common/ErrorBanner'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import { RunViewSkeleton } from '@/components/common/Skeletons'
-import { AppHeader } from '@/components/layout/AppHeader'
-import { ContextInspector } from '@/components/run/ContextInspector'
-import { EmptyState } from '@/components/run/EmptyState'
-import { ReconnectBanner } from '@/components/run/ReconnectBanner'
-import { RunHeader } from '@/components/run/RunHeader'
-import { SidePanel } from '@/components/run/SidePanel'
-import { ThinkingIndicator } from '@/components/run/ThinkingIndicator'
-import { Timeline } from '@/components/run/Timeline'
-import { RunList } from '@/components/runs/RunList'
+import { AppHeader } from '@/app/AppHeader'
+import { ContextInspector } from '@/features/run/components/ContextInspector'
+import { EmptyState } from '@/features/run/components/EmptyState'
+import { ReconnectBanner } from '@/features/run/components/ReconnectBanner'
+import { RunHeader } from '@/features/run/components/RunHeader'
+import { ThinkingIndicator } from '@/features/run/components/ThinkingIndicator'
+import { Timeline } from '@/features/run/components/Timeline'
+import { RunList } from '@/features/run/components/RunList'
 import { useActiveRun } from '@/features/run/hooks/useActiveRun'
-import { useStartRun } from '@/features/run/hooks/useStartRun'
+import { useStartRun } from '@/features/run/api/useStartRun'
 import { mapError } from '@/lib/errors'
-import { useUiStore } from '@/store/uiStore'
+import { useUiStore } from '@/stores/uiStore'
+import { RunSidebar } from './RunSidebar'
 
 export function ConsolePage() {
   const { runId } = useParams()
@@ -79,7 +79,7 @@ export function ConsolePage() {
           </section>
         </ErrorBoundary>
         {run ? (
-          <SidePanel
+          <RunSidebar
             run={run}
             onRefresh={() => void runQuery.refetch()}
             onInspectContext={() => setCtxOpen(true)}

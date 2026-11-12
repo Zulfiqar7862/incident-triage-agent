@@ -1,7 +1,8 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
-import { DataView, TechnicalDetails } from './DataView'
+import { DataView } from './DataView'
+import { TechnicalDetails } from './TechnicalDetails'
 
 describe('DataView', () => {
   it('renders structured fields without a default JSON <pre>', () => {
