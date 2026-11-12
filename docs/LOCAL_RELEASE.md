@@ -78,7 +78,7 @@ is excluded from the source archive; PNGs/GIF were refreshed and reviewed.
 
 Remaining Prettier failures: `frontend/index.html`, `src/components/common/DataView.tsx`,
 `src/components/common/ToolOutputView.tsx`, `src/components/run/ContextInspector.tsx`,
-`src/components/ui/badge.tsx`, `src/hooks/useRunStream.ts`, `src/lib/format.ts`,
+`src/components/ui/badge.tsx`, `src/features/run/hooks/useRunStream.ts`, `src/lib/format.ts`,
 `frontend/tsconfig.json`. They were not reformatted solely to clear a baseline.
 
 ## Boundaries and limitations

@@ -1,0 +1,7 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Full app" type="CompoundRunConfigurationType">
+    <toRun name="Backend (uvicorn)" type="PythonConfigurationType" />
+    <toRun name="Frontend dev (npm)" type="js.build_tools.npm" />
+    <method v="2" />
+  </configuration>
+</component>

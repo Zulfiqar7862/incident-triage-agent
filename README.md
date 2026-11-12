@@ -2,6 +2,10 @@
 
 A governed autonomous agent for incident investigation and remediation — not a chatbot wrapper.
 
+**Design and review docs:** [High-level design](docs/HLD.md) · [Low-level design](docs/LLD.md) ·
+[Architecture review guide](docs/ARCHITECTURE_REVIEW.md) (claim → code → test) ·
+[PyCharm setup and demo script](docs/PYCHARM_DEMO.md)
+
 **What this is evaluated on**
 
 1. **Autonomy** — plans the investigation, calls typed tools, retries transient failures, and finishes with a verified incident report.
@@ -33,8 +37,8 @@ Screenshots under [`docs/screenshots/`](docs/screenshots/). Recapture with `pyth
 
 ```mermaid
 flowchart TD
-  UI[React operator console<br/>Vite + TanStack Query + Zustand] -->|REST + SSE| API[FastAPI app/main.py]
-  API --> RT[Runtime facade]
+  UI[React operator console<br/>Vite + TanStack Query + Zustand] -->|REST + SSE| API[FastAPI routers<br/>app/presentation/http]
+  API --> RT[RunService<br/>app/application]
   RT --> LG[LangGraph StateGraph]
   LG --> P[prepare]
   P --> A[act: LLM + parallel reads]
@@ -49,6 +53,12 @@ flowchart TD
   Tools --> Sim[Simulated Kubernetes cluster]
 ```
 
+Details: [HLD](docs/HLD.md) (context, components, deployment, failure handling),
+[LLD](docs/LLD.md) (layers, classes, graph, sequences, data model, API), and the
+[architecture review guide](docs/ARCHITECTURE_REVIEW.md) (design patterns and SOLID
+with code excerpts; every claim mapped to a test). Layer boundaries are enforced by
+`tests/test_architecture.py` in CI.
+
 ### Stack
 
 | Layer | Choice |
@@ -62,20 +72,20 @@ flowchart TD
 | Path | Role |
 |---|---|
 | `frontend/` | Production operator UI (Vite + React + TypeScript) |
-| `app/domain/` | Pure policies & labels (lifecycle sets, write-confidence gate, alert cards) |
-| `app/application/` | Use-case helpers (exceptions, write-gate builder) |
-| `app/infrastructure/` | Adapter entry points (cluster factory, LLM Strategy factory) |
-| `app/agent/graph.py` | LangGraph `StateGraph` (`prepare` → `act` → gates → loop) |
-| `app/agent/nodes/` | Node implementations; HITL via `interrupt` / `Command(resume=...)` |
-| `app/runtime.py` | Lifecycle facade: create / pause / cancel / approve; drives the graph |
-| `app/config/` | `pydantic-settings` v2 (env-only overrides via `Settings.from_env()`) |
+| `app/domain/` | Pure policy and contracts: ports, write-confidence gate, budgets, loop guard, lifecycle, LLM value types |
+| `app/application/` | Use cases: `RunService` (create / pause / cancel / approve / resume; drives the graph), event recorder, LLM gateway, tool executor, write gate |
+| `app/agent/` | LangGraph `StateGraph` (`prepare` → `act` → gates → loop); nodes use `AgentRuntimePort`; HITL via `interrupt` / `Command(resume=...)` |
+| `app/tools/` | Typed tool schemas and registry; read / write / meta kinds |
 | `app/context/` | Layered prompt: system + working memory + compacted transcript |
-| `app/tools/` | Typed schemas + registry factory; read / write / meta kinds |
-| `app/llm/` | Neutral history + provider Strategy adapters + Gemini 429 → fallback |
+| `app/infrastructure/` | Adapters: SQLite `Store` (events hash chain, checkpoint CAS), `MockCluster`, runbooks, LangGraph checkpointer, factories |
+| `app/llm/` | LLM adapters (Gemini with 429 fallback, Anthropic, OpenAI, scripted) and the `make_llm` factory |
+| `app/presentation/` | FastAPI routers, schemas, auth, error mapping, middleware; plain-language operator projections |
+| `app/runtime.py` | Composition: `RunService` wired with the default adapters |
+| `app/main.py` | HTTP composition root: settings, store, LLM, middleware, routers, SPA |
+| `app/config/` | `pydantic-settings` v2 (env-only overrides via `Settings.from_env()`) |
 | `app/db/` | SQLAlchemy 2 models + Alembic migrations |
-| `app/store.py` | Sync Store facade (UI/SSE source of truth) with checkpoint CAS |
 | `app/observability/` | structlog, OTel GenAI spans, Prometheus `/metrics`, optional Langfuse |
-| `app/main.py` | Thin HTTP presentation: auth, CORS, CSP, health/metrics, SSE, SPA |
+| `.run/` | Shared PyCharm run configurations ([guide](docs/PYCHARM_DEMO.md)) |
 | `docs/LOCAL_SETUP.md` | Git checkout / archive setup, tests, and release limitations |
 | `.claude/skills/` | Pinned project-local frontend design/testing guidance and licenses |
 | `scripts/quickstart.sh` | One-command local boot (Python + frontend build + uvicorn) |
@@ -134,9 +144,9 @@ See [`.env.example`](.env.example). Important variables:
 | `LLM_PROVIDER` | `auto` | `auto` \| `gemini` \| `anthropic` \| `openai` \| `scripted` |
 | `GEMINI_API_KEY` | — | Live Gemini; omit to use the offline deterministic provider |
 | `REQUIRE_LLM` | `false` | Set `false` to allow scripted fallback without a key |
-| `API_TOKEN` | — | Bearer token required outside localhost |
+| `API_TOKEN` | — | Optional bearer token; when set, every `/api` route requires it (probes stay open) |
 | `CORS_ORIGINS` | empty | Comma-separated; empty = same-origin |
-| `DB_PATH` | `data/agent.db` | SQLite path (or set `DATABASE_URL` for Postgres) |
+| `DB_PATH` | `data/agent.db` | SQLite path for the run Store. `DATABASE_URL` (Postgres) moves only the LangGraph checkpointer; the Store stays SQLite |
 | `SCRIPTED_DELAY_S` | `0.8` | Offline provider pacing for local / CI |
 
 Secrets are env-only, redacted in logs, and never committed.
@@ -197,8 +207,8 @@ Health: `GET /healthz`, readiness: `GET /readyz`, metrics: `GET /metrics`. One u
 
 GitHub Actions (`.github/workflows/ci.yml`) and GitLab CI (`.gitlab-ci.yml`):
 
-1. **test** — ruff, mypy, pytest, scripted evals; Playwright UI E2E (offline scenario + no console errors)
-2. **frontend** — `npm ci`, lint (oxlint), `tsc --noEmit`, Vitest, production build
+1. **test** — ruff, mypy, architecture boundary tests, pytest, scripted evals; Playwright UI E2E (offline scenario + no console errors)
+2. **frontend** — `npm ci`, lint (oxlint), typecheck (`tsc -b`), Vitest, production build
 3. **docker** — multi-stage image build (needs test + frontend)
 
 ---
@@ -207,6 +217,7 @@ GitHub Actions (`.github/workflows/ci.yml`) and GitLab CI (`.gitlab-ci.yml`):
 
 ```bash
 make test                 # backend unit / API
+pytest -q tests/test_architecture.py   # layer boundaries + port conformance
 make lint && make typecheck
 make eval                 # scripted offline evals
 make frontend-test        # lint + typecheck + Vitest
@@ -221,17 +232,32 @@ Results for live Gemini runs are recorded in [`docs/E2E_RESULTS.md`](docs/E2E_RE
 ## Project structure
 
 ```
-app/                 FastAPI + LangGraph agent (domain / application / infrastructure / presentation)
+app/
+  domain/            ports, policy, budgets, guards, lifecycle, LLM value types (no frameworks)
+  application/       RunService + events, LLM gateway, tool executor, write gate, working memory
+  agent/             LangGraph graph, state, nodes (prepare, act, approval, input)
+  tools/             typed tool specs + registry, plain-language labels
+  context/           prompt and context-window builder
+  infrastructure/    Store (SQLite), MockCluster, runbooks, checkpointer, factories
+  llm/               Gemini / Anthropic / OpenAI / scripted adapters, make_llm
+  presentation/      http/ (routes, schemas, auth, errors, middleware), run view, operator projections
+  config/ db/ observability/
+  runtime.py         composition: RunService + default adapters
+  main.py            HTTP composition root
 frontend/            Vite React TypeScript operator console
-  src/components/    layout, runs sidebar, timeline, approval, tools
-  src/features/      run + approval hooks (TanStack actions, active-run query)
-  src/hooks/         SSE stream with reconnect + reducer
+  src/features/      run/ (hooks: queries, SSE stream, actions, start run) · approval/ (ApprovalCard)
+  src/components/    layout/ (header) · runs/ (sidebar) · run/ (timeline, tool cards, side panel) · common/ · ui/
+  src/hooks/         generic hooks (useElapsed)
+  src/pages/         ConsolePage (route container)
+  src/lib/           API client, query keys, formatting, error mapping
   src/store/         Zustand UI state only (theme, thinking phase)
+tests/               pytest suites incl. test_architecture.py (import boundaries)
 scenarios/           Curated incident scenarios
 runbooks/            Tool-backed runbook content
 evals/               Offline deterministic evaluation harness
 scripts/             quickstart, screenshots, UI E2E, live E2E
-docs/                HARDENING, E2E_RESULTS, operator walkthrough, screenshots
+.run/                Shared PyCharm run configurations
+docs/                HLD, LLD, architecture review, PyCharm demo, hardening, E2E results, walkthrough
 ```
 
 ---
