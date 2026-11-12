@@ -308,3 +308,31 @@ def test_check_llm_script_against_strict_gemini(monkeypatch, capsys):
     assert asyncio.run(check.main()) == 0
     out = capsys.readouterr().out
     assert "PASS" in out and "thought signatures" in out
+
+
+def test_quota_error_switches_to_fallback_model():
+    """GeminiWithFallback is a drop-in LLMPort that swaps models on quota errors only."""
+    from app.domain.llm import LLMResponse, LLMTransientError
+    from app.llm.providers import GeminiWithFallback
+
+    class Fake:
+        def __init__(self, model, error=None):
+            self.model, self.error, self.calls = model, error, 0
+
+        async def complete(self, system, messages, tools, state=None):
+            self.calls += 1
+            if self.error:
+                raise self.error
+            return LLMResponse(text="ok", model=self.model)
+
+    primary = Fake("primary", LLMTransientError("HTTP 429 RESOURCE_EXHAUSTED"))
+    fallback = Fake("fallback")
+    llm = GeminiWithFallback(primary, fallback)  # type: ignore[arg-type]
+    resp = asyncio.run(llm.complete("s", [], []))
+    assert resp.model == "fallback" and llm.model == "fallback"
+    assert (primary.calls, fallback.calls) == (1, 1)
+
+    overloaded = GeminiWithFallback(Fake("p", LLMTransientError("HTTP 503 overloaded")), Fake("f"))  # type: ignore[arg-type]
+    with pytest.raises(LLMTransientError):
+        asyncio.run(overloaded.complete("s", [], []))
+    assert overloaded.model == "p"
