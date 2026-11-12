@@ -149,3 +149,22 @@ def test_health_lists_new_limits(tmp_path):
         h = c.get("/api/health").json()
         assert h["llm"]["provider"] == "scripted"
         assert len(c.get("/api/scenarios").json()) == 3
+
+
+def test_tool_calls_are_counted_in_prometheus(tmp_path):
+    from app.observability.metrics import TOOL_CALLS
+
+    def count(tool: str) -> float:
+        return TOOL_CALLS.labels(tool=tool, error="false")._value.get()
+
+    async def go():
+        settings = Settings(db_path=str(tmp_path / "t.db"), tool_backoff_s=0.01)
+        store = Store(settings.db_path)
+        rt = Runtime(store, ScriptedPolicy(delay_s=0), settings)
+        before = count("get_alert")
+        rid = rt.create_run("db-pool-regression")["run_id"]
+        st = await _wait(store, rid, {"awaiting_approval"})
+        assert count("get_alert") == before + 1
+        assert st["usage"]["tool_calls"] >= 1
+
+    asyncio.run(go())

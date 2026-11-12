@@ -14,6 +14,7 @@ from app.domain.errors import ToolError, ToolTransientError
 from app.domain.guards import find_injection_markers
 from app.domain.llm import ToolCall
 from app.domain.ports import ClusterPort
+from app.observability.metrics import record_tool
 from app.tools import ToolArgsError, ToolSpec
 
 ToolOutcome = tuple[str, bool, dict[str, Any]]
@@ -121,6 +122,7 @@ class ToolExecutor:
             )
         st["usage"]["tool_calls"] += 1
         st["usage"]["tool_errors"] += int(is_error)
+        record_tool(call.name, is_error)
         self._events.emit(
             st,
             "tool.result",
