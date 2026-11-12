@@ -1,5 +1,7 @@
 # End-to-end results (live Gemini)
 
+> These live runs predate the layered refactor of 2026-11-12. Offline verification of the refactor: [REFACTOR_VERIFICATION_2026-11-12.md](verification/REFACTOR_VERIFICATION_2026-11-12.md).
+
 Generated locally with a real `GEMINI_API_KEY` (not committed). Primary model requested: `gemini-3.5-flash-lite`.
 No secrets are included in this file.
 
