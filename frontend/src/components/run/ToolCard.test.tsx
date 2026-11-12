@@ -71,8 +71,31 @@ it('does not expose raw technical results even when an error row is expanded', a
       }}
     />,
   )
-  await userEvent.click(screen.getByRole('button'))
+  // No operator facts to reveal, so the row is not expandable.
+  expect(screen.queryByRole('button')).not.toBeInTheDocument()
   expect(container.textContent).not.toContain('TimeoutError')
   expect(container.textContent).not.toContain('DB_POOL_SIZE')
   expect(container.querySelector('pre')).toBeNull()
+})
+
+it('only offers to expand a check when there are details to show', () => {
+  render(
+    <ToolCard
+      tool={{
+        id: 'alert',
+        name: 'get_alert',
+        args: {},
+        status: 'ok',
+        operator: {
+          title: 'Review the incident',
+          summary: 'The incident alert is still active.',
+          fields: [],
+          evidence: [],
+          impact: '',
+        },
+      }}
+    />,
+  )
+  expect(screen.getByText('Review the incident')).toBeInTheDocument()
+  expect(screen.queryByRole('button')).not.toBeInTheDocument()
 })
