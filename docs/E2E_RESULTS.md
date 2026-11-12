@@ -23,12 +23,22 @@ No secrets are included in this file.
 - **approval-rejected (db-pool-regression)**: checkout-service experienced elevated 5xx error rates (>12%) due to database connection pool exhaustion caused by version v2.14.0 reducing DB_POOL_SIZE from 50 to 5. A rollback to 
 - **resume-after-restart (upstream-oom)**: Investigated ALRT-4907 (payment-gateway 5xx error rate above 5%), traced the root cause to OOMKilled / Java heap space exhaustion in the fraud-check dependency service, and safely 
 
-## Offline suite (same machine, no live key required)
+## Offline suite (fresh clone, no live key required)
 
-- pytest: **41 passed**
-- scripted evals: **Passed 3/3 (resolved, root cause named, no wrong changes, injection-safe)**
-- frontend: oxlint + `tsc --noEmit` + Vitest (approval card, tool card, SSE reducer)
-- Playwright UI E2E: full offline scenario including approval, no JS console errors (`python -m scripts.e2e_ui`)
+Commit `cb67f6f`, 2026-11-12, fresh clone, Python 3.13.5, Node 24.22.1. Full log:
+[`verification/PYCHARM_VERIFICATION_2026-11-12.md`](verification/PYCHARM_VERIFICATION_2026-11-12.md).
+
+| Check | Result |
+|---|---|
+| pytest (`tests`, live file excluded) | **69 passed** |
+| Architecture boundary tests | **10 passed** |
+| Scripted evals | **Passed 3/3** (resolved, root cause named, no wrong changes, injection-safe) |
+| ruff / mypy | clean / no issues in 68 source files |
+| Frontend | oxlint clean, `tsc -b` clean, Vitest **11 files / 32 tests** passed, production build OK |
+| Playwright `scripts.e2e_ui` | OK in 8.9 s; approve with edit, pause/resume, reject, stop; no console warnings or errors |
+| Playwright against the **Backend (uvicorn)** run configuration | run completed in 7 steps, 56 events, approval gate after 6.4 s, done after 8.3 s; hash chain `{'ok': True, 'events': 56}` |
+
+The live-Gemini table above is from an earlier run and was not repeated here.
 
 ## How to re-run
 
