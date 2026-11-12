@@ -23,22 +23,32 @@ No secrets are included in this file.
 - **approval-rejected (db-pool-regression)**: checkout-service experienced elevated 5xx error rates (>12%) due to database connection pool exhaustion caused by version v2.14.0 reducing DB_POOL_SIZE from 50 to 5. A rollback to 
 - **resume-after-restart (upstream-oom)**: Investigated ALRT-4907 (payment-gateway 5xx error rate above 5%), traced the root cause to OOMKilled / Java heap space exhaustion in the fraud-check dependency service, and safely 
 
+## Latest live check (2026-11-12)
+
+One live Gemini run on `db-pool-regression` (commit `287ad3c`): survived an HTTP 503
+and a read timeout via retries, reached approval after 140.7 s with
+`rollback_deploy` checkout-service → v2.13.2 (confidence 0.98), approved,
+`completed` with `resolved=True` and simulator `sim_resolved=True`; 5 LLM calls,
+34,125 tokens, est. $0.0225; hash chain verified (51 events).
+
 ## Offline suite (fresh clone, no live key required)
 
-Commit `cb67f6f`, 2026-11-12, fresh clone, Python 3.13.5, Node 24.22.1. Full log:
-[`verification/PYCHARM_VERIFICATION_2026-11-12.md`](verification/PYCHARM_VERIFICATION_2026-11-12.md).
+Commit `dd2b3ea`, 2026-11-12, fresh clone from GitHub, Python 3.13.5, Node 24.22.1.
+Full log: [`verification/FINAL_REVIEW_VERIFICATION_2026-11-12.md`](verification/FINAL_REVIEW_VERIFICATION_2026-11-12.md)
+(earlier: [`PYCHARM_VERIFICATION_2026-11-12.md`](verification/PYCHARM_VERIFICATION_2026-11-12.md)).
 
 | Check | Result |
 |---|---|
-| pytest (`tests`, live file excluded) | **69 passed** |
+| pytest (non-live) | **70 passed** |
 | Architecture boundary tests | **10 passed** |
 | Scripted evals | **Passed 3/3** (resolved, root cause named, no wrong changes, injection-safe) |
 | ruff / mypy | clean / no issues in 68 source files |
-| Frontend | oxlint clean, `tsc -b` clean, Vitest **11 files / 32 tests** passed, production build OK |
-| Playwright `scripts.e2e_ui` | OK in 8.9 s; approve with edit, pause/resume, reject, stop; no console warnings or errors |
-| Playwright against the **Backend (uvicorn)** run configuration | run completed in 7 steps, 56 events, approval gate after 6.4 s, done after 8.3 s; hash chain `{'ok': True, 'events': 56}` |
+| Frontend | oxlint clean, Prettier clean, `tsc -b` clean, Vitest **11 files / 32 tests**, build OK |
+| Playwright `scripts.e2e_ui` | OK in 9 s; approve with edit, pause/resume, reject, stop; no console warnings or errors |
+| API checks against the **Backend (uvicorn)** run configuration | **23 / 23** (SSE + replay, approve, reject, message, pause/resume, cancel, emergency stop, verify, metrics, probes) |
+| `scripts/quickstart.sh` in a clean clone | serving after ~32 s; UI flow completed, chain verified |
 
-The live-Gemini table above is from an earlier run and was not repeated here.
+The live-Gemini table at the top is from an earlier full run of all scenarios.
 
 ## How to re-run
 
