@@ -6,7 +6,8 @@ export function argStr(a: Record<string, unknown> | undefined): string {
   return Object.entries(a || {})
     .map(([k, v]) => {
       if (v == null) return `${k}=—`
-      if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return `${k}=${v}`
+      if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean')
+        return `${k}=${v}`
       return `${k}=…`
     })
     .join(', ')
@@ -64,7 +65,12 @@ export const FIELD_LABELS: Record<string, string> = {
   confidence: 'Confidence',
 }
 
-export function phaseLine(status: string, planStep: string | null | undefined, step: number, maxSteps: number): string {
+export function phaseLine(
+  status: string,
+  planStep: string | null | undefined,
+  step: number,
+  maxSteps: number,
+): string {
   if (status === 'awaiting_approval') return 'Waiting for your approval'
   if (status === 'awaiting_input') return 'Waiting for your answer'
   if (status === 'paused') return 'Paused — resume when ready'

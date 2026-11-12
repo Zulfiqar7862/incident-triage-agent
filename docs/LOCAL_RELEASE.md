@@ -76,10 +76,7 @@ or horizontal overflow; its intentional missing-run page produces four reported
 resolved capture uses reduced motion. The historical MP4 was not refreshed and
 is excluded from the source archive; PNGs/GIF were refreshed and reviewed.
 
-Remaining Prettier failures: `frontend/index.html`, `src/components/common/DataView.tsx`,
-`src/components/common/ToolOutputView.tsx`, `src/components/run/ContextInspector.tsx`,
-`src/components/ui/badge.tsx`, `src/features/run/hooks/useRunStream.ts`, `src/lib/format.ts`,
-`frontend/tsconfig.json`. They were not reformatted solely to clear a baseline.
+All frontend files now pass `npm run format:check` (Prettier); CI runs that check in the frontend job.
 
 ## Boundaries and limitations
 

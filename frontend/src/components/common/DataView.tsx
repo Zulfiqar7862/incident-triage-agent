@@ -17,14 +17,24 @@ function Truncated({ text }: { text: string }) {
   return (
     <span className="break-words">
       {open ? text : `${text.slice(0, MAX_STRING)}…`}{' '}
-      <button type="button" className="text-[var(--color-accent)] underline-offset-2 hover:underline" onClick={() => setOpen((v) => !v)}>
+      <button
+        type="button"
+        className="text-[var(--color-accent)] underline-offset-2 hover:underline"
+        onClick={() => setOpen((v) => !v)}
+      >
         {open ? 'Show less' : 'Show more'}
       </button>
     </span>
   )
 }
 
-function Badge({ children, tone = 'neutral' }: { children: ReactNode; tone?: 'neutral' | 'ok' | 'warn' | 'danger' | 'accent' }) {
+function Badge({
+  children,
+  tone = 'neutral',
+}: {
+  children: ReactNode
+  tone?: 'neutral' | 'ok' | 'warn' | 'danger' | 'accent'
+}) {
   const tones = {
     neutral: 'bg-[var(--color-muted)] text-[var(--color-fg-secondary)]',
     ok: 'bg-[var(--color-success-soft)] text-[var(--color-success)]',
@@ -33,7 +43,12 @@ function Badge({ children, tone = 'neutral' }: { children: ReactNode; tone?: 'ne
     accent: 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]',
   }
   return (
-    <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold', tones[tone])}>
+    <span
+      className={cn(
+        'inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold',
+        tones[tone],
+      )}
+    >
       {children}
     </span>
   )
@@ -82,7 +97,13 @@ function TableFromObjects({ rows }: { rows: Record<string, unknown>[] }) {
   )
 }
 
-export function TechnicalDetails({ data, label = 'Technical details' }: { data: unknown; label?: string }) {
+export function TechnicalDetails({
+  data,
+  label = 'Technical details',
+}: {
+  data: unknown
+  label?: string
+}) {
   const [open, setOpen] = useState(false)
   let raw = ''
   try {
@@ -145,7 +166,10 @@ export function DataView({ data, depth = 0, compact = false, className }: DataVi
     }
     if (data.every((x) => typeof x !== 'object' || x == null)) {
       return (
-        <ul className={cn('m-0 list-disc space-y-1 pl-4 text-sm', className)} data-testid="data-view">
+        <ul
+          className={cn('m-0 list-disc space-y-1 pl-4 text-sm', className)}
+          data-testid="data-view"
+        >
           {data.map((item, i) => (
             <li key={i}>
               <Truncated text={formatScalar(item)} />
@@ -157,7 +181,10 @@ export function DataView({ data, depth = 0, compact = false, className }: DataVi
     return (
       <div className={cn('space-y-2', className)} data-testid="data-view">
         {data.map((item, i) => (
-          <div key={i} className="rounded-md border border-[var(--color-border)] bg-[var(--color-elevated)] p-2.5">
+          <div
+            key={i}
+            className="rounded-md border border-[var(--color-border)] bg-[var(--color-elevated)] p-2.5"
+          >
             <DataView data={item} depth={depth + 1} compact />
           </div>
         ))}
@@ -174,7 +201,9 @@ export function DataView({ data, depth = 0, compact = false, className }: DataVi
     <dl
       className={cn(
         'm-0 grid gap-x-4 gap-y-2',
-        compact ? 'grid-cols-[minmax(5rem,30%)_1fr] text-[12.5px]' : 'grid-cols-[minmax(7rem,32%)_1fr] text-sm',
+        compact
+          ? 'grid-cols-[minmax(5rem,30%)_1fr] text-[12.5px]'
+          : 'grid-cols-[minmax(7rem,32%)_1fr] text-sm',
         className,
       )}
       data-testid="data-view"
@@ -188,7 +217,10 @@ export function DataView({ data, depth = 0, compact = false, className }: DataVi
           } else {
             body = <DataView data={value} depth={depth + 1} compact />
           }
-        } else if (typeof value === 'string' && (key === 'status' || key === 'severity' || /status|severity|level/i.test(key))) {
+        } else if (
+          typeof value === 'string' &&
+          (key === 'status' || key === 'severity' || /status|severity|level/i.test(key))
+        ) {
           body = <Badge tone={statusTone(value)}>{formatScalar(value, key)}</Badge>
         } else if (typeof value === 'boolean') {
           body = <Badge tone={value ? 'ok' : 'neutral'}>{formatScalar(value, key)}</Badge>

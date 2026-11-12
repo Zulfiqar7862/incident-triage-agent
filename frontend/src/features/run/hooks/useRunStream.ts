@@ -117,7 +117,8 @@ export function useRunStream(runId: string | null) {
       es.onmessage = (e) => {
         try {
           const ev = JSON.parse(e.data) as AgentEvent
-          if (e.lastEventId) cursorRef.current = Math.max(cursorRef.current, Number(e.lastEventId) || 0)
+          if (e.lastEventId)
+            cursorRef.current = Math.max(cursorRef.current, Number(e.lastEventId) || 0)
           else if (ev.seq) cursorRef.current = Math.max(cursorRef.current, ev.seq)
           if (ev.run_id === id) {
             dispatch({ type: 'event', event: ev })
@@ -157,7 +158,6 @@ export function useRunStream(runId: string | null) {
   useEffect(() => {
     connectRef.current = connect
   }, [connect])
-
 
   useEffect(() => {
     cursorRef.current = 0

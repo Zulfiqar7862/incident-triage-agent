@@ -60,7 +60,12 @@ export function StatusBadge({
         className,
       )}
     >
-      <span className={cn('inline-block size-1.5 rounded-full', dot[s] || 'bg-[var(--color-fg-tertiary)]')} />
+      <span
+        className={cn(
+          'inline-block size-1.5 rounded-full',
+          dot[s] || 'bg-[var(--color-fg-tertiary)]',
+        )}
+      />
       {text}
     </span>
   )
